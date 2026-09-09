@@ -5,3 +5,8 @@
 .rules .departure{margin-top:20px;padding:16px;background:#f3edfc;border-radius:10px}.rules .departure>b{background:#643da5}
 
 .creator{border-bottom:0;padding-bottom:30px}.creator h2{font-size:14px;color:#617a7c}.creator p{margin-bottom:0}
+
+/* Keep long permission hostnames within their own column. */
+dl{grid-template-columns:minmax(0,210px) minmax(0,1fr);column-gap:24px}
+dt,dd{min-width:0;overflow-wrap:anywhere}
+@media(max-width:600px){dl{grid-template-columns:minmax(0,1fr)}}
