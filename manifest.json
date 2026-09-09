@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "나이스 교외체험학습 알림",
+  "version": "1.5.3",
+  "description": "지정 학년·반의 나이스 교외체험학습 신청 건을 확인해 알려주고, 교외체험학습 1일 전 완결 건도 함께 알려줍니다.",
+  "minimum_chrome_version": "120",
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://*.neis.go.kr/*",
+    "https://raw.githubusercontent.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "교외체험학습 알림"
+  },
+  "icons": {
+    "128": "icon.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.neis.go.kr/*"
+      ],
+      "js": [
+        "hook.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://*.neis.go.kr/*"
+      ],
+      "js": [
+        "calendar.js",
+        "core.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ]
+}
