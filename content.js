@@ -20,10 +20,30 @@
   }
   function showNextNotice(){
     const next=notices.shift();if(!next)return;
-    panel=document.createElement('div');
-    Object.assign(panel.style,{position:'fixed',right:'24px',bottom:'64px',zIndex:'2147483647',background:next.kind==='report'?'#ad4f15':next.kind==='departure'?'#643da5':'#123c46',color:'white',padding:'16px 20px',borderRadius:'12px',maxWidth:'410px',maxHeight:'60vh',overflowY:'auto',whiteSpace:'pre-line',font:'14px/1.8 sans-serif',boxShadow:'0 8px 30px #0003'});
-    panel.setAttribute('role','status');panel.textContent=next.text;document.body.appendChild(panel);
-    noticeTimer=setTimeout(()=>{panel?.remove();panel=null;if(!stopped)showNextNotice();},15000);
+    const current=document.createElement('div'),previousFocus=document.activeElement;
+    panel=current;current.setAttribute('data-neis-trip-notice','');
+    Object.assign(current.style,{position:'fixed',right:'24px',bottom:'64px',zIndex:'2147483647',background:next.kind==='report'?'#ad4f15':next.kind==='departure'?'#643da5':'#123c46',color:'white',padding:'12px 16px 16px',borderRadius:'12px',boxSizing:'border-box',maxWidth:'min(410px, calc(100vw - 48px))',maxHeight:'60vh',display:'flex',flexDirection:'column',gap:'8px',overflow:'hidden',font:'14px/1.8 sans-serif',boxShadow:'0 8px 30px #0003'});
+    const close=document.createElement('button'),body=document.createElement('div');
+    close.type='button';close.textContent='닫기 ×';close.setAttribute('aria-label','알림 닫기');
+    Object.assign(close.style,{all:'initial',boxSizing:'border-box',alignSelf:'flex-end',flexShrink:'0',display:'inline-flex',alignItems:'center',justifyContent:'center',minWidth:'68px',minHeight:'32px',padding:'4px 10px',border:'1px solid #ffffff80',borderRadius:'6px',background:'#ffffff1a',color:'white',font:'600 13px/1.4 sans-serif',cursor:'pointer'});
+    body.setAttribute('role','status');body.textContent=next.text;
+    Object.assign(body.style,{minHeight:'0',overflowY:'auto',overscrollBehavior:'contain',whiteSpace:'pre-line',overflowWrap:'anywhere'});
+    function dismiss(){
+      if(panel!==current)return;
+      const restoreFocus=document.activeElement===close;
+      clearTimeout(noticeTimer);current.remove();panel=null;
+      // Only return focus after keyboard dismissal; showing a notice never changes focus.
+      if(restoreFocus&&previousFocus?.isConnected)previousFocus.focus({preventScroll:true});
+      if(!stopped)showNextNotice();
+    }
+    // Dismissing with the mouse must not blur the teacher's active input.
+    close.addEventListener('mousedown',event=>{if(event.button===0)event.preventDefault();event.stopPropagation();});
+    close.addEventListener('click',event=>{event.preventDefault();event.stopPropagation();dismiss();});
+    close.addEventListener('focus',()=>{close.style.outline='2px solid white';close.style.outlineOffset='2px';});
+    close.addEventListener('blur',()=>{close.style.outline='none';});
+    for(const type of ['keydown','keyup'])close.addEventListener(type,event=>event.stopPropagation());
+    current.append(close,body);document.body.appendChild(current);
+    noticeTimer=setTimeout(dismiss,15000);
   }
   async function identity() {
     const bar=document.querySelector('.topbar');
