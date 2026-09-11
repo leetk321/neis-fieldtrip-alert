@@ -8,6 +8,7 @@
     const read=async(store,key)=>(await store.get(key))[key];
     const profile=()=>read(local,'reportProfile'),connection=()=>read(sessionStore,'reportConnection');
     const consented=async()=>await env.consented()&&(await read(local,'reportConsent'))?.version===1;
+    const needsResume=async()=>!!(await consented()&&(await profile())?.enabled&&!await connection());
     const status=s=>local.set({reportStatus:{...s,updatedAt:Date.now()}});
     const schedule=c=>chrome.alarms.create(ALARM,{periodInMinutes:c.config.interval,delayInMinutes:c.config.interval});
     async function disconnect(message,state='disconnected'){
@@ -75,11 +76,6 @@
       const p=await profile();
       if(!p?.enabled){await disconnect('보고서관리에서 조회를 연결하세요.');return;}
       await disconnect('로그인된 나이스 탭을 기다립니다.','waiting');
-      if(!await consented())return;
-      for(const tab of await chrome.tabs.query({url:'https://*.neis.go.kr/*'})){
-        if(!tab.id||new URL(tab.url).origin!==p.origin)continue;
-        try{const who=await chrome.tabs.sendMessage(tab.id,{type:'WHO'});if(who?.ok&&(await resume(tab.id,tab.url,who.identity)).resumed)return;}catch{}
-      }
     }
     async function getState(){
       const p=await profile(),c=await connection(),s=await read(local,'reportStatus');
@@ -110,6 +106,7 @@
         }
         const tab=(await chrome.tabs.query({active:true,currentWindow:true}))[0];
         if(!tab?.id||!/^https:\/\/[^/]+\.neis\.go\.kr\//.test(tab.url||''))throw Error('나이스 보고서관리 탭을 활성화해 주세요.');
+        if(!await env.ensureTab(tab))throw Error('나이스 화면이 준비된 뒤 보고서 연결을 다시 시작하세요.');
         const nonce=crypto.randomUUID(),result=await chrome.tabs.sendMessage(tab.id,{type:'ARM',kind:'report',config:current.config,nonce});
         if(!result?.ok)throw Error(result?.error||'보고서 연결 준비에 실패했습니다.');
         await disconnect('60초 안에 보고서관리에서 조회를 누르세요.','connecting');
@@ -126,7 +123,7 @@
       if(m.type==='REPORT_STOP'){const p=await profile();if(p)await local.set({reportProfile:{...p,enabled:false}});await disconnect('사용자가 보고서 감시를 중지했습니다.');return {ok:true};}
       throw Error('지원하지 않는 보고서 요청입니다.');
     }
-    return {ALARM,handle,poll,startup,resume,canIdentify,getState,reset,invalidate,removed,connection};
+    return {ALARM,handle,poll,startup,resume,canIdentify,getState,reset,invalidate,removed,connection,needsResume};
   }
   root.TripReportWatcher={create};
 })(globalThis);

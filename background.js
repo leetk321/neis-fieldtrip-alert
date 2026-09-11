@@ -1,17 +1,25 @@
 'use strict';
-importScripts('calendar.js','core.js','holiday-sync.js','report-watcher.js');
+importScripts('calendar.js','core.js','holiday-sync.js','tab-bridge.js','report-watcher.js');
 const holidaySync=HolidaySync.create(chrome.storage.local,TripCalendar,typeof fetch==='function'?fetch.bind(globalThis):undefined);
 const C=TripCore, ALARM='trip-poll';
 const defaults={year:C.schoolYear(),grade:'',classNo:'',interval:5,excludedDates:[]};
 const storageReady=chrome.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});
 storageReady.catch(()=>{});
 let queue=Promise.resolve();
-const serial=fn=>{const run=async()=>{await storageReady;return fn();};const p=queue.then(run,run);queue=p.catch(()=>{});return p;};
+const serial=fn=>{const run=async()=>{await storageReady;try{return await fn();}finally{await maintainRecoveryAlarm().catch(()=>{});}};const p=queue.then(run,run);queue=p.catch(()=>{});return p;};
 const session=async()=> (await chrome.storage.session.get('connection')).connection;
 const config=async()=> (await chrome.storage.local.get('config')).config||defaults;
 const profile=async()=> (await chrome.storage.local.get('watchProfile')).watchProfile;
 const consented=async()=> (await chrome.storage.local.get('privacyConsent')).privacyConsent?.version===1;
-const reports=TripReportWatcher.create({chrome,core:C,setup,consented,validatedProfile,logAlert,showPageNotice,watchingNeis});
+const bridge=TripTabBridge.create(chrome);
+const reports=TripReportWatcher.create({chrome,core:C,setup,consented,validatedProfile,logAlert,showPageNotice,watchingNeis,ensureTab:bridge.ensure});
+const RECOVERY_ALARM='trip-reconnect';
+async function applicationNeedsResume(){return !!(await consented()&&(await profile())?.enabled&&!await session());}
+async function maintainRecoveryAlarm(){
+  const needed=await applicationNeedsResume()||await reports.needsResume();
+  if(!needed){await chrome.alarms.clear(RECOVERY_ALARM);return;}
+  if(!await chrome.alarms.get(RECOVERY_ALARM))await chrome.alarms.create(RECOVERY_ALARM,{periodInMinutes:1,delayInMinutes:1});
+}
 async function setup(){
   const value=await config();
   try{return {config:C.config(value),configured:true};}
@@ -76,11 +84,22 @@ async function resumeFromPage(tabId,pageUrl,identity) {
 }
 async function probeOpenTabs(){
   if(!await consented())return;
-  const saved=await profile();if(!saved?.enabled)return;
+  const pending=await chrome.storage.session.get(['arm','reportArm']);
+  if([pending.arm,pending.reportArm].some(a=>a?.until>Date.now()))return;
+  if(!await applicationNeedsResume()&&!await reports.needsResume())return;
+  const saved=await profile();
   const tabs=await chrome.tabs.query({url:'https://*.neis.go.kr/*'});
   for(const tab of tabs){
     if(!tab.id)continue;
-    try{const who=await chrome.tabs.sendMessage(tab.id,{type:'WHO'});if(who?.ok&&(await resumeFromPage(tab.id,tab.url,who.identity)).resumed)return;}catch{}
+    try{
+      const application=await applicationNeedsResume()&&new URL(tab.url).origin===saved?.origin;
+      const report=await reports.needsResume()&&await reports.canIdentify(tab.url);
+      if((!application&&!report)||!await bridge.ensure(tab))continue;
+      const who=await chrome.tabs.sendMessage(tab.id,{type:'WHO',origin:new URL(tab.url).origin});if(!who?.ok)continue;
+      if(application)await resumeFromPage(tab.id,tab.url,who.identity);
+      if(report)await reports.resume(tab.id,tab.url,who.identity);
+    }catch{}
+    if(!await applicationNeedsResume()&&!await reports.needsResume())return;
   }
 }
 async function watchingNeis(connection){
@@ -188,25 +207,37 @@ async function prepareHolidays(){
   await holidaySync.refresh().catch(()=>{});
 }
 chrome.alarms.onAlarm.addListener(a=>{
+  if(a.name===RECOVERY_ALARM)return serial(probeOpenTabs);
   if(a.name===reports.ALARM)return serial(reports.poll);
   if(a.name===ALARM)return serial(poll);
   if(a.name===HOLIDAY_ALARM)return serial(()=>holidaySync.refresh().catch(()=>{}));
 });
 chrome.runtime.onInstalled.addListener(details=>serial(async()=>{
-  await prepareHolidays();
   await reports.startup();
   const current=await setup();
   const saved=await profile();
-  if(current.configured&&saved?.enabled){await waitForNeis('로그인된 나이스 탭이 열리면 감시를 자동으로 재개합니다.');await probeOpenTabs();}
+  if(current.configured&&saved?.enabled)await waitForNeis('저장된 연결을 유지하고 나이스 감시를 자동으로 재개합니다.');
   else await clearConnection(current.configured?'나이스 신청서관리 화면에서 조회 연결을 시작하세요.':'먼저 알림을 받을 학년도·학년·반을 설정하고 저장하세요.');
+  await probeOpenTabs();
   if(details?.reason==='install')await chrome.tabs.create({url:chrome.runtime.getURL('welcome.html')});
+  await prepareHolidays();
 }));
 chrome.runtime.onStartup.addListener(()=>serial(async()=>{
-  await prepareHolidays();
   await reports.startup();
-  if((await profile())?.enabled){await waitForNeis('로그인된 나이스 탭을 찾고 있습니다.');await probeOpenTabs();}
+  if((await profile())?.enabled)await waitForNeis('로그인된 나이스 탭을 찾고 있습니다.');
   else await clearConnection('자동 재개가 꺼져 있습니다. 나이스에서 조회를 다시 연결하면 켜집니다.');
+  await probeOpenTabs();
+  await prepareHolidays();
 }));
+chrome.tabs.onUpdated.addListener((tabId,change,tab)=>{
+  if(change.status!=='loading'&&change.status!=='complete')return;
+  return serial(async()=>{
+    if(change.status==='loading'){
+      await reports.removed(tabId);
+      if((await session())?.tabId===tabId)await waitForNeis('나이스 화면이 준비되면 저장된 조건으로 자동 연결합니다.');
+    }else if(/^https:\/\/[^/]+\.neis\.go\.kr\//.test(tab.url||''))await probeOpenTabs();
+  });
+});
 chrome.tabs.onRemoved.addListener(tabId=>serial(async()=>{
   await reports.removed(tabId);
   if((await session())?.tabId!==tabId)return;
@@ -226,6 +257,8 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     }
     if(message.type==='PAGE_READY') {
       if(!page)throw Error('잘못된 발신자입니다.');
+      const pending=await chrome.storage.session.get(['arm','reportArm']);
+      if([pending.arm,pending.reportArm].some(a=>a?.until>Date.now()))return {ok:true,resumed:false,waitingForCapture:true};
       const application=await resumeFromPage(sender.tab.id,sender.url,message.identity);
       const report=await reports.resume(sender.tab.id,sender.url,message.identity);
       return {ok:true,...application,reportResumed:report.resumed};
@@ -274,6 +307,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       if(!current.configured)throw Error('먼저 학년도·학년·반을 설정하고 저장하세요.');
       const tabs=await chrome.tabs.query({active:true,currentWindow:true});const tab=tabs[0];
       if(!tab?.id||!/^https:\/\/[^/]+\.neis\.go\.kr\//.test(tab.url||''))throw Error('나이스 탭을 활성화한 뒤 연결을 시작하세요.');
+      if(!await bridge.ensure(tab))throw Error('나이스 화면이 준비된 뒤 연결 시작을 다시 눌러 주세요.');
       const c=current.config,nonce=crypto.randomUUID();
       const result=await chrome.tabs.sendMessage(tab.id,{type:'ARM',config:c,nonce});
       if(!result.ok)throw Error(result.error);

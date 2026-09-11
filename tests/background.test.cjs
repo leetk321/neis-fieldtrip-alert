@@ -9,8 +9,19 @@ function harness(savedConfig={year:'2026',grade:'2',classNo:'3',interval:5},deny
  let snapshot={records:[rec()],count:1,total:2},reportSnapshot={reports:[],count:0,total:0},reportFail=false,fail=false,notificationFail=false,whoIdentity='a'.repeat(64),now=Date.parse('2026-09-01T01:00:00Z');
  class Clock extends Date{constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
  const chrome={storage:{local:storage('local'),session:storage('session')},action:{setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{}},alarms:{clear:async n=>alarms.delete(n),create:async(n,o)=>alarms.set(n,o),onAlarm:event('alarm')},notifications:{create:async(n,o)=>{if(notificationFail)throw Error('notification unavailable');osNotifications.push({n,...o});},onClicked:event('notification')},windows:{get:async()=>({focused:foreground,state:minimized?'minimized':'normal'}),update:async()=>{}},tabs:{get:async()=>({active:foreground,windowId:1}),query:async()=>[{id:123,url:'https://goe.neis.go.kr/jsp/main.jsp'}],sendMessage:async(id,msg)=>{pageMessages.push(msg);return msg.type==='ARM'?{ok:true,identity:'a'.repeat(64)}:msg.type==='WHO'?{ok:true,identity:whoIdentity}:msg.type==='NOTICE'?{ok:true}:fail?{ok:false,error:'로그인 만료'}:{ok:true,snapshot};},create:async options=>{tabsCreated.push(options);return {id:999,...options};},onRemoved:event('removed'),update:async()=>({windowId:1})},runtime:{id:'test-extension',getURL:path=>'chrome-extension://test-extension/'+path,onInstalled:event('installed'),onStartup:event('startup'),onMessage:event('message')}};
+ const injections=[];
+ chrome.runtime.getManifest=()=>({version:'1.8.0'});
+ chrome.alarms.get=async name=>alarms.get(name);
+ chrome.tabs.onUpdated=event('updated');
+ chrome.tabs.query=async()=>data.openTabs||[{id:123,url:'https://goe.neis.go.kr/jsp/main.jsp',status:'complete'}];
+ chrome.scripting={executeScript:async options=>{injections.push(options);if(data.injectionFail)throw Error('Cannot access tab');if(options.world==='ISOLATED')data.contentMissing=false;return [];}};
  const originalSend=chrome.tabs.sendMessage;
- chrome.tabs.sendMessage=async(id,msg)=>msg.type==='POLL'&&msg.kind==='report'?(reportFail?{ok:false,error:'보고서 조회 실패'}:{ok:true,snapshot:reportSnapshot}):originalSend(id,msg);
+ chrome.tabs.sendMessage=async(id,msg)=>{
+   if(data.contentMissing)throw Error('Could not establish connection. Receiving end does not exist.');
+   if(msg.type==='PING')return {ok:true,protocol:2,version:'1.8.0'};
+   if(msg.type==='WHO'&&data.loggedOut)return {ok:false,error:'나이스 로그인이 필요합니다.'};
+   return msg.type==='POLL'&&msg.kind==='report'?(reportFail?{ok:false,error:'보고서 조회 실패'}:{ok:true,snapshot:reportSnapshot}):originalSend(id,msg);
+ };
  const context=vm.createContext({chrome,crypto:webcrypto,URL,console,fetch:holidayFetch,AbortController,TextDecoder,Date:Clock,setTimeout,clearTimeout,structuredClone});
  context.importScripts=(...files)=>files.forEach(f=>vm.runInContext(fs.readFileSync(path.join(dir,f),'utf8'),context));
  vm.runInContext(fs.readFileSync(path.join(dir,'background.js'),'utf8'),context);
@@ -22,7 +33,7 @@ function harness(savedConfig={year:'2026',grade:'2',classNo:'3',interval:5},deny
    const a=data.session.reportArm;
    return send({type:'REPORT_CAPTURE',nonce:a.nonce,identity:a.identity,template:{endpoint:'/report.do',body:'{}',headers:{},schema:{kind:'report',identityMode:'보고서 식별값'}},snapshot:s},page);
  }
- return {connectReport,setReportSnapshot:v=>reportSnapshot=v,setReportFail:()=>reportFail=true,osNotifications,setForeground:v=>foreground=v,setMinimized:v=>minimized=v,send,connect,data,alarms,notifications,pageMessages,tabsCreated,page,install:reason=>listeners.installed(reason?{reason}:undefined),startup:()=>listeners.startup(),alarm:name=>listeners.alarm({name}),removeTab:id=>listeners.removed(id),history:()=>Object.values(data.local.alertHistories||{})[0],setRecords:records=>snapshot={records,count:records.filter(r=>r.unsubmitted).length,total:records.length},setDepartures:departures=>snapshot.departures=departures,setSnapshot:v=>snapshot=v,setNow:date=>now=Date.parse(date+'T01:00:00Z'),setFail:()=>fail=true,setWho:value=>whoIdentity=value,setNotificationFail:value=>notificationFail=value};
+ return {injections,tabUpdated:(change,tab={id:123,url:'https://goe.neis.go.kr/jsp/main.jsp'})=>listeners.updated(tab.id,change,tab),connectReport,setReportSnapshot:v=>reportSnapshot=v,setReportFail:()=>reportFail=true,osNotifications,setForeground:v=>foreground=v,setMinimized:v=>minimized=v,send,connect,data,alarms,notifications,pageMessages,tabsCreated,page,install:reason=>listeners.installed(reason?{reason}:undefined),startup:()=>listeners.startup(),alarm:name=>listeners.alarm({name}),removeTab:id=>listeners.removed(id),history:()=>Object.values(data.local.alertHistories||{})[0],setRecords:records=>snapshot={records,count:records.filter(r=>r.unsubmitted).length,total:records.length},setDepartures:departures=>snapshot.departures=departures,setSnapshot:v=>snapshot=v,setNow:date=>now=Date.parse(date+'T01:00:00Z'),setFail:()=>fail=true,setWho:value=>whoIdentity=value,setNotificationFail:value=>notificationFail=value};
 }
 test('connection starts alarm and persists stage flags and automatic profile',async()=>{const h=harness();assert.equal((await h.connect()).ok,true);assert.equal(h.alarms.get('trip-poll').periodInMinutes,5);assert.equal(h.history()['b'.repeat(64)].firstSent,true);assert.equal(h.data.local.connection,undefined);assert.equal(h.data.local.watchProfile.enabled,true);assert.equal(h.data.local.watchProfile.origin,'https://goe.neis.go.kr');assert.equal(h.data.local.watchProfile.template.headers.cookie,undefined);assert.equal(h.notifications.length,1);assert.equal(JSON.stringify(h.history()).includes('2026-09-14'),false);});
 test('unchanged polls deduplicate and new application triggers first alert',async()=>{const h=harness();await h.connect();await h.send({type:'CHECK'});assert.equal(h.notifications.length,1);h.setRecords([rec('c')]);await h.send({type:'CHECK'});assert.equal(h.notifications.length,2);});
@@ -121,6 +132,65 @@ test('content scripts cannot grant privacy consent',async()=>{
 });
 
 const reportFixture=(key='b')=>({reports:[{key:key.repeat(64),receipt:'접수대기',unsubmitted:true,studentName:'보고서예시'}],count:1,total:1});
+
+test('extension update reattaches both watchers without recapture or duplicate notifications',async()=>{
+ const h=harness();await h.connect();h.setReportSnapshot(reportFixture());await h.connectReport();
+ const keep=['config','privacyConsent','reportConsent','watchProfile','reportProfile','alertHistories','reportHistories','alertLog'];
+ const before=Object.fromEntries(keep.map(k=>[k,structuredClone(h.data.local[k])]));
+ h.data.session={};h.data.contentMissing=true;const arms=h.pageMessages.filter(m=>m.type==='ARM').length;
+ await h.install('update');
+ assert.equal(h.injections.length,2);assert.deepEqual(h.injections.map(i=>i.world),['MAIN','ISOLATED']);
+ assert.ok(h.data.session.connection.automatic);assert.ok(h.data.session.reportConnection.automatic);
+ assert.equal(h.alarms.get('trip-poll').periodInMinutes,5);assert.equal(h.alarms.get('trip-report-poll').periodInMinutes,5);
+ assert.equal(h.alarms.has('trip-reconnect'),false);
+ assert.equal(h.pageMessages.filter(m=>m.type==='ARM').length,arms);
+ for(const k of keep)assert.deepEqual(h.data.local[k],before[k],k);
+ await h.alarm('trip-poll');await h.alarm('trip-report-poll');assert.equal(h.notifications.length,2);
+});
+test('update while NEIS is closed waits and recovers after tab loading completes',async()=>{
+ const h=harness();await h.connect();h.setReportSnapshot(reportFixture());await h.connectReport();
+ h.data.openTabs=[];h.data.contentMissing=true;await h.install('update');assert.equal(h.injections.length,0);assert.ok(h.alarms.has('trip-reconnect'));
+ h.data.openTabs=[{id:123,url:'https://goe.neis.go.kr/jsp/main.jsp',status:'loading'}];await h.alarm('trip-reconnect');assert.equal(h.injections.length,0);
+ h.data.openTabs[0].status='complete';await h.tabUpdated({status:'complete'});
+ assert.equal(h.injections.length,2);assert.ok(h.data.session.connection);assert.ok(h.data.session.reportConnection);assert.equal(h.notifications.length,2);
+});
+test('temporary injection failure retries from saved profile without erasing consent or history',async()=>{
+ const h=harness();await h.connect();h.data.contentMissing=true;h.data.injectionFail=true;await h.install('update');
+ assert.equal(h.data.session.connection,undefined);assert.ok(h.data.local.watchProfile.enabled);assert.ok(h.history()['b'.repeat(64)].firstSent);assert.ok(h.alarms.has('trip-reconnect'));
+ h.data.injectionFail=false;await h.alarm('trip-reconnect');assert.ok(h.data.session.connection);assert.equal(h.notifications.length,1);assert.equal(h.alarms.has('trip-reconnect'),false);
+});
+test('login can complete after update and resume both existing connections automatically',async()=>{
+ const h=harness();await h.connect();h.setReportSnapshot(reportFixture());await h.connectReport();
+ h.data.loggedOut=true;h.data.contentMissing=true;await h.install('update');assert.equal(h.data.session.connection,undefined);assert.equal(h.data.session.reportConnection,undefined);
+ h.data.loggedOut=false;await h.alarm('trip-reconnect');assert.ok(h.data.session.connection);assert.ok(h.data.session.reportConnection);assert.equal(h.notifications.length,2);assert.equal(h.injections.length,2);
+});
+test('update respects independently stopped watchers',async()=>{
+ for(const stop of ['STOP','REPORT_STOP']){
+  const h=harness();await h.connect();h.setReportSnapshot(reportFixture());await h.connectReport();await h.send({type:stop});h.data.contentMissing=true;await h.install('update');
+  assert.equal(!!h.data.session.connection,stop!=='STOP');assert.equal(!!h.data.session.reportConnection,stop!=='REPORT_STOP');assert.equal(h.notifications.length,2);
+ }
+ const h=harness();await h.connect();await h.send({type:'STOP'});h.data.contentMissing=true;await h.install('update');assert.equal(h.injections.length,0);assert.equal(h.alarms.has('trip-reconnect'),false);
+});
+test('automatic injection is limited to saved consenting origins and never queries a different account',async()=>{
+ const h=harness();await h.connect();h.data.contentMissing=true;h.data.openTabs=[{id:999,url:'https://sen.neis.go.kr/jsp/main.jsp'}];await h.install('update');assert.equal(h.injections.length,0);
+ h.data.openTabs=[{id:123,url:'https://goe.neis.go.kr/jsp/main.jsp'}];h.setWho('c'.repeat(64));const polls=h.pageMessages.filter(m=>m.type==='POLL').length;await h.alarm('trip-reconnect');
+ assert.equal(h.injections.length,2);assert.equal(h.pageMessages.filter(m=>m.type==='POLL').length,polls);assert.equal(h.data.session.connection,undefined);
+ delete h.data.local.privacyConsent;h.data.contentMissing=true;await h.alarm('trip-reconnect');assert.equal(h.injections.length,2);assert.equal(h.alarms.has('trip-reconnect'),false);
+});
+test('pending schema profiles survive update and remain in learning state without manual recapture',async()=>{
+ const h=harness();await h.connect();h.setReportSnapshot(reportFixture());await h.connectReport();
+ h.data.local.watchProfile.template.schema={pending:true,path:['rows'],totalPath:['totalCount']};
+ h.data.local.reportProfile.template.schema={kind:'report',pending:true,path:['rows'],totalPath:['totalCount']};
+ h.setSnapshot({records:[],departures:[],count:0,total:0,awaitingSchema:true});h.setReportSnapshot({reports:[],count:0,total:0,awaitingSchema:true});h.data.contentMissing=true;
+ await h.install('update');assert.equal(h.data.local.status.state,'learning');assert.equal(h.data.local.reportStatus.state,'learning');assert.equal(h.data.local.watchProfile.template.schema.pending,true);assert.equal(h.data.local.reportProfile.template.schema.pending,true);assert.equal(h.notifications.length,2);
+});
+test('recovery does not interrupt an explicit capture or repeatedly reinject healthy tabs',async()=>{
+ const h=harness();await h.connect();await h.send({type:'ARM'});h.data.contentMissing=true;await h.alarm('trip-reconnect');assert.equal(h.injections.length,0);assert.ok(h.data.session.arm);
+ h.data.session.arm.until=0;await h.alarm('trip-reconnect');assert.equal(h.injections.length,2);await h.alarm('trip-reconnect');assert.equal(h.injections.length,2);
+});
+test('first manual connection can attach to a tab opened before extension installation',async()=>{
+ const h=harness();h.data.contentMissing=true;await h.install('install');assert.equal(h.injections.length,0);await h.connect();assert.equal(h.injections.length,2);assert.ok(h.data.session.connection);
+});
 test('report connection coexists with applications and deduplicates by independent report history',async()=>{
  const h=harness();await h.connect();h.setReportSnapshot(reportFixture());assert.equal((await h.connectReport()).ok,true);
  assert.ok(h.data.session.connection);assert.ok(h.data.session.reportConnection);
