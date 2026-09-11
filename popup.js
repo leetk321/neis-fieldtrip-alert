@@ -69,7 +69,7 @@ async function action(type,extra={}){
     const result=await request({type,...extra});await refresh();
     if(type==='ARM')message.textContent='연결 준비 완료 · 60초 안에 진행해 주세요.\n① 이 팝업을 닫으세요.\n② 나이스의 조회 버튼을 누르세요.';
     if(type==='QUERY_TEST')message.textContent=result.awaitingSchema?(result.needsConfirmation?'신청서 발견 · 전체 건수 확인을 위해 연결 시작 후 나이스에서 조회하세요.':'조회 응답 확인 · 아직 신청서 학습 대기 중입니다.'):`조회 성공 · 현재 미상신 ${result.count}건 · ${new Date(result.checkedAt).toLocaleString('ko-KR')} · 알림 이력은 변경하지 않았습니다.`;
-    if(type==='SAVE')message.textContent='설정을 저장했습니다. 신청서와 보고서를 각각 다시 연결해 주세요.';
+    if(type==='SAVE')message.textContent='설정을 저장했습니다.\n신청서와 보고서를 각각 다시 연결해 주세요.';
     if(type==='RESET')message.textContent='알림 기록만 초기화했습니다. 두 연결은 유지됩니다. 다음 확인에서 조건에 맞는 신청서와 보고서를 다시 알릴 수 있습니다.';
     if(type==='TEST')message.textContent=result.pageShown?'최근 알림과 나이스 화면에 표시 테스트를 완료했습니다.':'최근 알림에 표시 테스트를 완료했습니다. Windows 알림 설정과 무관하게 확인할 수 있습니다.';
     return true;
