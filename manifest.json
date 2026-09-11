@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "나이스 교외체험학습 알림",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "지정 학년·반의 나이스 교외체험학습 미상신 신청, 완결 체험 시작과 새 접수대기·미상신 보고서를 알려줍니다.",
   "minimum_chrome_version": "120",
   "permissions": [

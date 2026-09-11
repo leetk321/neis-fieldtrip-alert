@@ -29,6 +29,8 @@ Chrome API는 모형으로, 공휴일 HTTP는 모의 응답으로 검증합니�
 
 Python 3에서 실행합니다. 실행 파일만 포함한 스토어 ZIP을 dist에 생성하며 manifest.json은 최상위에 둡니다. 외부 라이선스 고지도 포함합니다.
 
+같은 버전 ZIP이 이미 있으면 내용이 동일한 경우에만 그대로 재사용합니다. 내용이 달라졌다면 덮어쓰지 않고 종료하므로 manifest.json 버전을 먼저 올리세요. 이전 버전 ZIP과 소스는 별도로 보존합니다.
+
 ```sh
 python scripts/package.py
 ```

@@ -22,6 +22,13 @@ function renderAlerts(items){
     head.append(title,time);article.append(head,body);box.appendChild(article);
   }
 }
+function renderSummary(id,status,kind){
+  const state=status.state;
+  const label=state==='learning'?'학습 대기':state==='setup'?'설정 필요':labels[state]||'연결 필요';
+  const count=Number.isInteger(status.count)&&status.count>=0
+    ?' · '+(state==='watching'?(kind==='report'?'대상 ':'미상신 '):'최근 ')+status.count+'건':'';
+  $(id).textContent=label+count;
+}
 async function request(message){const result=await chrome.runtime.sendMessage(message);if(!result?.ok)throw Error(result?.error||'확장 프로그램 응답을 확인할 수 없습니다.');return result;}
 async function refresh(){
   try {
@@ -30,6 +37,8 @@ async function refresh(){
     configured=data.configured===true;connected=data.connected===true;
     const report=data.report||{},rs=report.status||{};
     reportConnected=report.connected===true;
+    renderSummary('applicationSummary',s,'application');
+    renderSummary('reportSummary',rs,'report');
     $('reportConsentBox').hidden=report.privacyConsented===true;
     $('reportState').textContent=(rs.state==='learning'?'보고서 학습 대기':labels[rs.state]||'연결 필요')+(rs.count==null?'':' · '+rs.count+'건');
     $('reportStatus').textContent=rs.message||'보고서관리에서 조회를 별도로 연결하세요.';
@@ -50,14 +59,23 @@ async function refresh(){
     $('holidayStatus').textContent=h.updatedAt?'공휴일 최근 갱신: '+new Date(h.updatedAt).toLocaleString('ko-KR')+(h.failed?' · 재조회 실패, 저장 자료로 계속 동작':''):'공휴일: 내장 자료 사용'+(h.failed?' · 다운로드 실패, 감시는 계속 동작':'');
     if(h.years?.length)$('holidayStatus').textContent+='\n저장된 연도: '+h.years.join(', ');
     renderAlerts(data.alertLog);
-  }catch(e){$('message').textContent=e.message;}
+  }catch(e){$('globalMessage').textContent=e.message;$('applicationSummary').textContent='확인 필요';$('reportSummary').textContent='확인 필요';}
 }
 async function action(type,extra={}){
-  $('message').textContent=type==='ARM'?'나이스 연결을 준비하고 있습니다…':'';
+  const message=$(['SAVE','RESET','TEST'].includes(type)?'globalMessage':'message');
+  message.textContent=type==='ARM'?'나이스 연결을 준비하고 있습니다…':'';
   busy=true;controls();
-  try{const result=await request({type,...extra});await refresh();if(type==='ARM')$('message').textContent='연결 준비 완료 · 60초 안에 진행해 주세요.\n① 이 팝업을 닫으세요.\n② 나이스의 조회 버튼을 누르세요.';if(type==='QUERY_TEST')$('message').textContent=result.awaitingSchema?(result.needsConfirmation?'신청서 발견 · 전체 건수 확인을 위해 연결 시작 후 나이스에서 조회하세요.':'조회 응답 확인 · 아직 신청서 학습 대기 중입니다.'):`조회 성공 · 현재 미상신 ${result.count}건 · ${new Date(result.checkedAt).toLocaleString('ko-KR')} · 알림 이력은 변경하지 않았습니다.`;if(type==='RESET')$('message').textContent='알림 기록만 초기화했습니다. 연결은 유지됩니다. 지금 확인을 누르면 현재 신청서를 새 알림처럼 다시 확인합니다.';if(type==='TEST')$('message').textContent=result.pageShown?'최근 알림과 나이스 화면에 표시 테스트를 완료했습니다.':'최근 알림에 표시 테스트를 완료했습니다. Windows 알림 설정과 무관하게 확인할 수 있습니다.';return true;}
-  catch(e){$('message').textContent=e.message.includes('Receiving end')?'나이스 탭을 새로고침하고 신청서관리 화면에서 다시 연결하세요.':e.message;return false;}
-  finally{busy=false;controls();if(type==='ARM'){ $('message').focus({preventScroll:true});$('message').scrollIntoView({block:'center'}); }}
+  try{
+    const result=await request({type,...extra});await refresh();
+    if(type==='ARM')message.textContent='연결 준비 완료 · 60초 안에 진행해 주세요.\n① 이 팝업을 닫으세요.\n② 나이스의 조회 버튼을 누르세요.';
+    if(type==='QUERY_TEST')message.textContent=result.awaitingSchema?(result.needsConfirmation?'신청서 발견 · 전체 건수 확인을 위해 연결 시작 후 나이스에서 조회하세요.':'조회 응답 확인 · 아직 신청서 학습 대기 중입니다.'):`조회 성공 · 현재 미상신 ${result.count}건 · ${new Date(result.checkedAt).toLocaleString('ko-KR')} · 알림 이력은 변경하지 않았습니다.`;
+    if(type==='SAVE')message.textContent='설정을 저장했습니다. 신청서와 보고서를 각각 다시 연결해 주세요.';
+    if(type==='RESET')message.textContent='알림 기록만 초기화했습니다. 두 연결은 유지됩니다. 다음 확인에서 조건에 맞는 신청서와 보고서를 다시 알릴 수 있습니다.';
+    if(type==='TEST')message.textContent=result.pageShown?'최근 알림과 나이스 화면에 표시 테스트를 완료했습니다.':'최근 알림에 표시 테스트를 완료했습니다. Windows 알림 설정과 무관하게 확인할 수 있습니다.';
+    return true;
+  }
+  catch(e){message.textContent=e.message.includes('Receiving end')?'나이스 탭을 새로고침하고 신청서관리 화면에서 다시 연결하세요.':e.message;return false;}
+  finally{busy=false;controls();if(type==='ARM'||message.id==='globalMessage'){message.focus({preventScroll:true});message.scrollIntoView({block:'center'});}}
 }
 $('settings').addEventListener('input',()=>dirty=true);
 $('settings').addEventListener('submit',async e=>{e.preventDefault();const c={};for(const id of ['year','grade','classNo','interval'])c[id]=$(id).value;c.excludedDates=$('excludedDates').value;if(await action('SAVE',{config:c}))dirty=false;});
