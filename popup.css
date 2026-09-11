@@ -26,7 +26,7 @@ main{padding:16px 22px}
 .watcher-panel[open]>summary::before{transform:rotate(45deg);margin-top:-4px}
 .watcher-panel>summary:hover{background:#00000004;border-radius:10px}
 .watcher-name{font-size:14px;font-weight:700;white-space:nowrap}
-.watcher-summary{margin-left:auto;text-align:right;font-size:11px;line-height:1.5;color:#3d6a61;overflow-wrap:anywhere}
+.watcher-summary{margin-left:auto;text-align:right;font-size:14px;font-weight:600;line-height:1.5;color:#3d6a61;overflow-wrap:anywhere}
 .report-settings .watcher-name,.report-settings .watcher-summary{color:#994210}
 .watcher-body{padding:0 12px 14px}
 .watcher-body>.status{padding:12px;margin:0 0 12px}
@@ -39,3 +39,4 @@ main{padding:16px 22px}
 summary:focus-visible,#alertLog:focus-visible{outline:2px solid #398f82;outline-offset:2px;border-radius:8px}
 #alertLog{max-height:190px;overflow-y:auto;overscroll-behavior:contain}
 .alert-inbox>#test{display:block;margin-top:9px;padding:5px 8px}
+#holidayStatus{white-space:pre-line;overflow-wrap:anywhere}

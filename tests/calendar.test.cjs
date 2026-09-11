@@ -15,7 +15,29 @@ test('first alert is one-time across pending and canceled states',()=>{let p=C.p
 test('canceled application qualifies for first alert when first eligible',()=>{const p=C.plan([r('a','접수취소')],{},'2026-09-01');assert.deepEqual(p.first,['a']);});
 test('application first observed as received alerts once if later canceled',()=>{let p=C.plan([r('a','접수')],{},'2026-09-01');assert.deepEqual(p.first,[]);p=C.plan([r('a','접수취소')],p.history,'2026-09-02');assert.deepEqual(p.first,['a']);p.history.a.firstSent=true;assert.deepEqual(C.plan([r('a','접수취소')],p.history,'2026-09-03').first,[]);});
 test('only pending and canceled unsubmitted states qualify once at deadline',()=>{for(const state of ['접수대기','접수취소']){const before=C.plan([r('a',state)],{},'2026-09-06');assert.deepEqual(before.reminder,[]);const due=C.plan([r('a',state)],before.history,'2026-09-07');assert.deepEqual(due.reminder,['a']);due.history.a.reminderSent=true;assert.deepEqual(C.plan([r('a',state)],due.history,'2026-09-12').reminder,[]);}const received=C.plan([r('a','접수')],{},'2026-09-12');assert.deepEqual(received.first,[]);assert.deepEqual(received.reminder,[]);});
-test('unsubmitted alerts stop after the start date including retries and reset',()=>{for(const receipt of ['접수대기','접수취소']){let p=C.plan([r('a',receipt)],{},'2026-09-14');assert.deepEqual(p.first,['a']);assert.deepEqual(p.reminder,['a']);for(const history of [{},p.history,{a:{firstPending:true}}]){p=C.plan([r('a',receipt)],history,'2026-09-15');assert.deepEqual(p.first,[]);assert.deepEqual(p.reminder,[]);}}});
+test('unsubmitted alerts stop after the start date including retries and reset',()=>{for(const receipt of ['접수대기','접수취소']){let p=C.plan([r('a',receipt)],{},'2026-09-14');assert.deepEqual(p.first,[]);assert.deepEqual(p.reminder,['a']);assert.deepEqual(p.combined,['a']);for(const history of [{},p.history,{a:{firstPending:true}}]){p=C.plan([r('a',receipt)],history,'2026-09-15');assert.deepEqual(p.first,[]);assert.deepEqual(p.reminder,[]);assert.deepEqual(p.combined,[]);}}});
+
+test('first eligibility on or after five-workday threshold merges both stages',()=>{
+ for(const receipt of ['접수대기','접수취소'])for(const date of ['2026-09-07','2026-09-11','2026-09-14']){
+  const p=C.plan([r('a',receipt)],{},date);
+  assert.deepEqual(p.first,[]);assert.deepEqual(p.reminder,['a']);assert.deepEqual(p.combined,['a']);
+  assert.equal(p.history.a.firstSent,undefined);assert.equal(p.history.a.reminderSent,undefined);
+ }
+});
+test('early first alert remains separate from the later deadline alert',()=>{
+ const p=C.plan([r()],{},'2026-09-06');assert.deepEqual(p.first,['a']);assert.deepEqual(p.combined,[]);
+ p.history.a.firstSent=true;p.history.a.firstPending=false;
+ const due=C.plan([r()],p.history,'2026-09-07');assert.deepEqual(due.first,[]);assert.deepEqual(due.reminder,['a']);assert.deepEqual(due.combined,[]);
+});
+test('undelivered first alert and failed combined alert retry as one due alert',()=>{
+ let p=C.plan([r()],{},'2026-09-06');
+ p=C.plan([r()],p.history,'2026-09-07');assert.deepEqual(p.first,[]);assert.deepEqual(p.combined,['a']);
+ p=C.plan([r()],p.history,'2026-09-08');assert.deepEqual(p.first,[]);assert.deepEqual(p.reminder,['a']);assert.deepEqual(p.combined,['a']);
+});
+test('merging uses holiday-adjusted threshold and leaves other applications independent',()=>{
+ const p=C.plan([r('holiday','접수대기',true,'2026-09-28'),r('early','접수대기',true,'2026-10-15')],{},'2026-09-17');
+ assert.deepEqual(p.first,['early']);assert.deepEqual(p.reminder,['holiday']);assert.deepEqual(p.combined,['holiday']);
+});
 test('submitted or completed item is not reminded',()=>assert.deepEqual(C.plan([r('a','접수',false)],{},'2026-09-10').reminder,[]));
 test('submitted in progress pending or canceled item never enters either alert stage',()=>{for(const state of ['접수대기','접수취소']){const p=C.plan([r('a',state,false)],{},'2026-09-10');assert.deepEqual(p.first,[]);assert.deepEqual(p.reminder,[]);}});
 test('moving trip date keeps previously sent stages',()=>{const p=C.plan([r('a','접수대기',true,'2026-09-28')],{a:{observed:true,firstSent:true,reminderSent:true}},'2026-09-20');assert.deepEqual(p.first,[]);assert.deepEqual(p.reminder,[]);});

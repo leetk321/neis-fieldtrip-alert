@@ -133,16 +133,18 @@
         dueDates.push({key:row.key,date:dueDate});
         if(date>=dueDate&&!old.reminderSent)reminder.push(row.key);
       }catch(e){warnings.push(e.message);}
-      // Flags for notifications are committed by the worker after Chrome accepts them.
+      // Delivery flags are committed by the worker after the alert is saved.
     }
     // Retry a failed initial delivery while the application is still pending or canceled.
     for(const row of records)if(date<=row.startDate&&row.unsubmitted&&history[row.key]?.firstPending&&!history[row.key].firstSent&&['접수대기','접수취소'].includes(row.receipt)&&!first.includes(row.key))first.push(row.key);
+    // One delivery covers both stages when the first eligible observation (or retry) is already due.
+    const dueKeys=new Set(reminder),combined=first.filter(key=>dueKeys.has(key));
     for(const row of completed){
       const entry=history[row.key]||(history[row.key]={});
       const due=Calendar.subtractWorkdays(row.startDate,1,excluded);
       if(date>=due&&date<=row.startDate&&!entry.departureSent)departure.push(row.key);
     }
-    return {history,first,reminder,departure,warnings:[...new Set(warnings)],dueDates};
+    return {history,first:first.filter(key=>!dueKeys.has(key)),reminder,combined,departure,warnings:[...new Set(warnings)],dueDates};
   }
   function endpoint(url, origin) {
     const u = new URL(url, origin);

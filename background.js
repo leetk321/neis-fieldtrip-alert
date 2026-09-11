@@ -90,13 +90,16 @@ async function watchingNeis(connection){
     return tab.active===true&&win.focused===true&&win.state!=='minimized';
   }catch{return false;}
 }
-async function notify(rows,stage,connection) {
+async function notify(rows,stage,connection,combined=[]) {
   const count=rows.length;
   if(!count)return true;
   const c=connection.config;
   const names={first:'새 신청 · 1차',reminder:'미상신 처리 확인 · 2차',departure:'체험 시작 예정 · 완결'};
-  const title=`${c.grade}학년 ${c.classNo}반 · ${names[stage]}`;
+  const combinedCount=stage==='reminder'?rows.filter(row=>combined.includes(row.key)).length:0;
+  const label=combinedCount===count?'미상신 처리 확인 · 1·2차 통합':combinedCount?'미상신 처리 확인':names[stage];
+  const title=`${c.grade}학년 ${c.classNo}반 · ${label}`;
   let message=stage==='first'?`새로 확인한 신청서 ${count}건\n미상신 · 접수대기 / 접수취소\n나이스에서 신청서를 확인해 주세요.`:stage==='reminder'?`처리가 필요한 신청서 ${count}건\n체험 시작 5근무일 전 기준일 도달\n미상신 · 접수대기 / 접수취소`:`체험 시작을 앞둔 완결 신청서 ${count}건\n체험 시작 1근무일 전~시작일 당일 알림`;
+  if(combinedCount)message+=`\n처음 발견한 ${combinedCount}건은 1·2차를 합쳐 한 번 알립니다.`;
   message+='\n\n대상 학생\n'+rows.map(r=>'• '+String(r.studentName||'이름 확인 필요').replace(/[\r\n\t]+/g,' ')+(stage==='departure'?'\n  체험기간: '+String(r.period||r.startDate||'기간 확인 필요').replace(/[\r\n\t]+/g,' '):'')).join('\n');
   try {await logAlert(stage,title,message);} catch {return false;}
   if(!await watchingNeis(connection)){
@@ -153,8 +156,12 @@ async function applySnapshot(s,connection) {
   let alertFailed=false;
   for(const stage of ['first','reminder','departure']){
     const keys=plan[stage];if(!keys.length)continue;
-    if(await notify((stage==='departure'?(s.departures||[]):s.records).filter(r=>keys.includes(r.key)),stage,connection)){
-      for(const key of keys){histories[scope][key][stage+'Sent']=true;if(stage==='first')histories[scope][key].firstPending=false;}
+    if(await notify((stage==='departure'?(s.departures||[]):s.records).filter(r=>keys.includes(r.key)),stage,connection,plan.combined)){
+      for(const key of keys){
+        const entry=histories[scope][key];
+        entry[stage+'Sent']=true;
+        if(stage==='first'||(stage==='reminder'&&plan.combined.includes(key))){entry.firstSent=true;entry.firstPending=false;}
+      }
       await chrome.storage.local.set({alertHistories:histories});
     }else alertFailed=true;
   }
