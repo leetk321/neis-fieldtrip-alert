@@ -28,19 +28,34 @@ const root=path.resolve(__dirname,'..'),version=JSON.parse(fs.readFileSync(path.
     const before=await state();let navigations=0;page.on('framenavigated',()=>navigations++);
     const notice=page.locator('[data-neis-trip-notice]'),close=page.getByRole('button',{name:'알림 닫기',exact:true});
     const show=(kind,text)=>page.evaluate(({kind,text})=>requestNotice({kind,text}),{kind,text});
+    const checkLayout=async()=>{
+      const layout=await notice.evaluate(el=>{
+        const button=el.querySelector('button'),body=el.querySelector('[role="status"]');
+        const b=button.getBoundingClientRect(),t=body.getBoundingClientRect(),p=el.getBoundingClientRect();
+        const range=document.createRange();range.selectNodeContents(body);
+        const overlaps=Array.from(range.getClientRects()).some(r=>r.left<b.right&&r.right>b.left&&r.top<b.bottom&&r.bottom>b.top);
+        return {sameRow:Math.abs(t.top-b.top)<1,gap:b.left-t.right,inside:b.right<=p.right&&b.top>=p.top,width:b.width,height:b.height,radius:getComputedStyle(button).borderRadius,text:button.textContent,overlaps};
+      });
+      assert.ok(layout.sameRow,'Close button must share the first text row');
+      assert.ok(layout.gap>=9&&layout.inside&&!layout.overlaps,'Text must never overlap the close button');
+      assert.equal(layout.text,'x');assert.equal(layout.width,24);assert.equal(layout.height,24);assert.equal(layout.radius,'50%');
+    };
     for(const [kind,color] of [['first','rgb(18, 60, 70)'],['reminder','rgb(18, 60, 70)'],['departure','rgb(100, 61, 165)'],['report','rgb(173, 79, 21)'],['info','rgb(18, 60, 70)']]){
       await show(kind,'가상 알림\n대상 학생: 예시학생');
       assert.equal(await notice.evaluate(el=>getComputedStyle(el).backgroundColor),color);
+      await checkLayout();
       assert.deepEqual(await state(),before,'Showing a notice changed the draft, caret, focus or page scroll');
-      const counters=await page.evaluate(()=>({blurs,hostClicks,submitCount,messages:messages.length}));
+      const counters=await page.evaluate(()=>({blurs,hostClicks,submitCount,messages:messages.filter(m=>m.type!=='CAN_IDENTIFY').length}));
       await close.click();assert.equal(await notice.count(),0);assert.deepEqual(await state(),before);
-      assert.deepEqual(await page.evaluate(()=>({blurs,hostClicks,submitCount,messages:messages.length})),counters,'Dismissal leaked a click, blurred an input or changed worker state');
+      assert.deepEqual(await page.evaluate(()=>({blurs,hostClicks,submitCount,messages:messages.filter(m=>m.type!=='CAN_IDENTIFY').length})),counters,'Dismissal leaked a click, blurred an input or changed worker state');
     }
     // Close remains outside the scroller, even for many student names.
     await show('report','2학년 3반 · 새 보고서\n\n새로 확인한 교외체험학습 보고서\n접수대기 · 미상신\n\n대상 학생\n'+Array.from({length:35},(_,i)=>'• 가상학생 '+(i+1)).join('\n'));
     const closeBefore=await close.boundingBox();
+    await checkLayout();
     const scrolling=await notice.locator('[role="status"]').evaluate(el=>{el.scrollTop=el.scrollHeight;return {scroll:el.scrollTop,needed:el.scrollHeight>el.clientHeight};});
     assert.ok(scrolling.needed&&scrolling.scroll>0);assert.deepEqual(await close.boundingBox(),closeBefore);
+    await checkLayout();
     assert.deepEqual(await state(),before);
     if(process.env.NOTICE_SCREENSHOT){await notice.locator('[role="status"]').evaluate(el=>el.scrollTop=0);await page.screenshot({path:process.env.NOTICE_SCREENSHOT});}
     await close.click();
@@ -63,11 +78,15 @@ const root=path.resolve(__dirname,'..'),version=JSON.parse(fs.readFileSync(path.
     assert.equal(await page.evaluate(()=>contentListeners.size),1);assert.deepEqual(await state(),before);
     await show('report','업데이트 후 알림');await close.click();assert.deepEqual(await state(),before);
     // Narrow windows keep the close control visible and the banner inside the viewport.
-    await page.setViewportSize({width:360,height:640});await show('report','긴알림'.repeat(150));
-    const box=await notice.boundingBox(),button=await close.boundingBox();
-    assert.ok(box.x>=0&&box.x+box.width<=360);assert.ok(button.y>=box.y&&button.y+button.height<=box.y+box.height);
-    await close.click();assert.equal(await notice.count(),0);
+    for(const width of [280,360,520]){
+      await page.setViewportSize({width,height:640});await show('report','긴 제목과 줄바꿈 없는 내용: '+('긴알림'+ 'W'.repeat(20)).repeat(40));
+      const box=await notice.boundingBox(),button=await close.boundingBox();
+      assert.ok(box.x>=0&&box.x+box.width<=width);assert.ok(button.y>=box.y&&button.y+button.height<=box.y+box.height);
+      await checkLayout();
+      await notice.locator('[role="status"]').evaluate(el=>el.scrollTop=el.scrollHeight);await checkLayout();
+      await close.click();assert.equal(await notice.count(),0);
+    }
     assert.equal(navigations,0);assert.deepEqual(errors,[]);
-    console.log('PASS: five notice kinds; mouse/keyboard close; draft/caret/focus/scroll preserved; close visible for long/narrow content; timer/queue cleanup; update reinjection; no navigation, host clicks, submits or browser errors.');
+    console.log('PASS: five notice kinds; circular x shares first text row without overlap at 280/360/520/1080px; mouse/keyboard close; draft/caret/focus/scroll preserved; long/scrolled content; timer/queue cleanup; update reinjection; no navigation, host clicks, submits or browser errors.');
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

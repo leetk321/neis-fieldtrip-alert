@@ -22,12 +22,13 @@
     const next=notices.shift();if(!next)return;
     const current=document.createElement('div'),previousFocus=document.activeElement;
     panel=current;current.setAttribute('data-neis-trip-notice','');
-    Object.assign(current.style,{position:'fixed',right:'24px',bottom:'64px',zIndex:'2147483647',background:next.kind==='report'?'#ad4f15':next.kind==='departure'?'#643da5':'#123c46',color:'white',padding:'12px 16px 16px',borderRadius:'12px',boxSizing:'border-box',maxWidth:'min(410px, calc(100vw - 48px))',maxHeight:'60vh',display:'flex',flexDirection:'column',gap:'8px',overflow:'hidden',font:'14px/1.8 sans-serif',boxShadow:'0 8px 30px #0003'});
+    Object.assign(current.style,{position:'fixed',right:'24px',bottom:'64px',zIndex:'2147483647',background:next.kind==='report'?'#ad4f15':next.kind==='departure'?'#643da5':'#123c46',color:'white',padding:'16px',borderRadius:'12px',boxSizing:'border-box',maxWidth:'min(410px, calc(100vw - 48px))',maxHeight:'60vh',display:'grid',gridTemplateColumns:'minmax(0, 1fr) 24px',gridTemplateRows:'minmax(0, 1fr)',columnGap:'10px',overflow:'hidden',font:'14px/1.8 sans-serif',boxShadow:'0 8px 30px #0003'});
     const close=document.createElement('button'),body=document.createElement('div');
-    close.type='button';close.textContent='닫기 ×';close.setAttribute('aria-label','알림 닫기');
-    Object.assign(close.style,{all:'initial',boxSizing:'border-box',alignSelf:'flex-end',flexShrink:'0',display:'inline-flex',alignItems:'center',justifyContent:'center',minWidth:'68px',minHeight:'32px',padding:'4px 10px',border:'1px solid #ffffff80',borderRadius:'6px',background:'#ffffff1a',color:'white',font:'600 13px/1.4 sans-serif',cursor:'pointer'});
+    close.type='button';close.textContent='x';close.setAttribute('aria-label','알림 닫기');close.title='알림 닫기';
+    Object.assign(close.style,{all:'initial',boxSizing:'border-box',gridColumn:'2',gridRow:'1',alignSelf:'start',display:'inline-flex',alignItems:'center',justifyContent:'center',width:'24px',height:'24px',padding:'0',border:'1px solid #ffffff80',borderRadius:'50%',background:'#ffffff1a',color:'white',font:'600 15px/1 sans-serif',cursor:'pointer'});
     body.setAttribute('role','status');body.textContent=next.text;
-    Object.assign(body.style,{minHeight:'0',overflowY:'auto',overscrollBehavior:'contain',whiteSpace:'pre-line',overflowWrap:'anywhere'});
+    // Reserve a separate column beside the text so even wrapped/scrolled content cannot overlap x.
+    Object.assign(body.style,{gridColumn:'1',gridRow:'1',minWidth:'0',minHeight:'0',overflowY:'auto',overscrollBehavior:'contain',whiteSpace:'pre-line',overflowWrap:'anywhere'});
     function dismiss(){
       if(panel!==current)return;
       const restoreFocus=document.activeElement===close;
@@ -42,7 +43,7 @@
     close.addEventListener('focus',()=>{close.style.outline='2px solid white';close.style.outlineOffset='2px';});
     close.addEventListener('blur',()=>{close.style.outline='none';});
     for(const type of ['keydown','keyup'])close.addEventListener(type,event=>event.stopPropagation());
-    current.append(close,body);document.body.appendChild(current);
+    current.append(body,close);document.body.appendChild(current);
     noticeTimer=setTimeout(dismiss,15000);
   }
   async function identity() {
