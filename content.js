@@ -131,15 +131,15 @@
       const parsed=JSON.parse(d.body);
       const hasPaging=o=>o&&typeof o==='object'&&Object.entries(o).some(([k,v])=>
         (/^(pageSize|pageUnit|recordCountPerPage|limit|offset)$/i.test(k)&&Number(v)>0)||hasPaging(v));
-      if(hasPaging(parsed))throw Error('페이지 단위 조회가 감지되어 자동 감시 연결을 중단했습니다. 전체 조회 지원 확인이 필요합니다.');
+      if(hasPaging(parsed))throw Error('페이지 단위 조회가 감지되어 자동 감시 연결을 중단했습니다.\n전체 조회 지원 확인이 필요합니다.');
       const snapshot=await normalized(data,schema,pending.config,pending.kind);
       const report=pending.kind==='report';
       const reply=await send({type:report?'REPORT_CAPTURE':'CAPTURE',nonce:pending.nonce,identity:who,template:{endpoint,body:d.body,headers:d.headers,schema},snapshot});
       if(!reply.ok)throw Error(reply.error);
       pending=null;
-      if(schema.pending)notice('연결 조건 저장 완료\n첫 신청서 학습 대기 중입니다. 전체 건수 확인이 필요한 경우 팝업에서 안내합니다.');
-      else if(report)notice(`보고서 연결 완료 · 접수대기·미상신 ${snapshot.count}건. 새로 확인한 보고서를 한 번 알립니다.`,'report');
-      else notice(`연결 완료 · 현재 미상신 ${snapshot.count}건 (접수취소 포함). 접수대기·접수취소 신규 신청과 5근무일 전 알림을 확인합니다.`);
+      if(schema.pending)notice('[연결 조건 저장 완료]\n첫 신청서 학습 대기 중입니다.\n전체 건수 확인이 필요한 경우 팝업에서 안내합니다.');
+      else if(report)notice(`[보고서 연결 완료]\n현재 미상신 ${snapshot.count}건\n새로 확인한 보고서를 한 번 알립니다.`,'report');
+      else notice(`[연결 완료]\n현재 미상신 ${snapshot.count}건\n신규 신청 시 한 번, 5근무일 전 다시 한 번 알립니다.`);
     }catch(error){notice(error.message);await send({type:pending?.kind==='report'?'REPORT_CAPTURE_ERROR':'CAPTURE_ERROR',error:error.message}).catch(()=>{});}
     finally {captureBusy=false;}
   }
@@ -152,7 +152,7 @@
         const who=await identity();
         pending={nonce:message.nonce,config:message.config,identity:who,kind:message.kind||'application',until:Date.now()+60000};
         document.dispatchEvent(new CustomEvent('neis-trip-arm-v2',{detail:{nonce:pending.nonce}}));
-        notice('연결 준비 완료. 60초 안에 나이스의 조회 버튼을 한 번 눌러 주세요.');
+        notice('[연결 준비 완료]\n60초 안에 나이스의 조회 버튼을 한 번 눌러 주세요.');
         return {ok:true,identity:who};
       }
       if(message.type==='WHO'){

@@ -51,7 +51,7 @@ const root=path.resolve(__dirname,'..'),version=JSON.parse(fs.readFileSync(path.
       assert.deepEqual(await page.evaluate(()=>({blurs,hostClicks,submitCount,messages:messages.filter(m=>m.type!=='CAN_IDENTIFY').length})),counters,'Dismissal leaked a click, blurred an input or changed worker state');
     }
     // Close remains outside the scroller, even for many student names.
-    await show('report','2학년 3반 · 새 보고서\n\n새로 확인한 교외체험학습 보고서\n접수대기 · 미상신\n\n대상 학생\n'+Array.from({length:35},(_,i)=>'• 가상학생 '+(i+1)).join('\n'));
+    await show('report','[보고서 알림]\n새 교외체험학습 보고서 35건\n\n'+Array.from({length:35},(_,i)=>'• 가상학생 '+(i+1)).join('\n'));
     const closeBefore=await close.boundingBox();
     await checkLayout();
     const scrolling=await notice.locator('[role="status"]').evaluate(el=>{el.scrollTop=el.scrollHeight;return {scroll:el.scrollTop,needed:el.scrollHeight>el.clientHeight};});
@@ -61,7 +61,7 @@ const root=path.resolve(__dirname,'..'),version=JSON.parse(fs.readFileSync(path.
     if(process.env.NOTICE_SCREENSHOT){await notice.locator('[role="status"]').evaluate(el=>el.scrollTop=0);await page.screenshot({path:process.env.NOTICE_SCREENSHOT});}
     await close.click();
     if(process.env.NOTICE_SCREENSHOT){
-      await show('info','연결 완료 · 현재 미상신 0건 (접수취소 포함). 접수대기·접수취소 신규 신청과 5근무일 전 알림을 확인합니다.');
+      await show('info','[연결 완료]\n현재 미상신 0건\n신규 신청 시 한 번, 5근무일 전 다시 한 번 알립니다.');
       await checkLayout();
       await notice.screenshot({path:process.env.NOTICE_SCREENSHOT.replace(/\.png$/, '-detail.png')});await close.click();
     }

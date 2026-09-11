@@ -53,7 +53,7 @@
       ['grd', 'clsCd', 'clsNo', 'regDt', 'eduActPrcsStsNm'].every(k => Object.hasOwn(r, k))));
     if (matches.length !== 1) throw Error('신청서 응답을 하나로 식별하지 못했습니다. 연결을 다시 시도하세요.');
     const {path, rows} = matches[0];
-    if (!Number.isInteger(total) || total !== rows.length) throw Error('화면 총건수와 응답 건수가 다릅니다. 전체 목록을 조회한 뒤 다시 연결하세요.');
+    if (!Number.isInteger(total) || total !== rows.length) throw Error('화면 총건수와 응답 건수가 다릅니다.\n전체 목록을 조회한 뒤 다시 연결하세요.');
     const keys = Object.keys(rows[0]);
     const namedApprovals=keys.filter(k=>k!=='eduActPrcsStsNm'&&/(?:atrz|approval|appr).*(?:sts|status).*(?:nm|name)$/i.test(k));
     const statuses = keys.filter(k => k !== 'eduActPrcsStsNm' && rows.some(r => isApprovalStatus(compact(r[k]))));

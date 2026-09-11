@@ -17,7 +17,7 @@
     walk(data);
     if(lists.length!==1)throw Error('보고서 목록을 하나로 확인할 수 없습니다.');
     const {path,rows}=lists[0];
-    if(!Number.isInteger(total)||total!==rows.length)throw Error('화면 총건수와 보고서 응답 건수가 다릅니다. 전체 목록으로 연결하세요.');
+    if(!Number.isInteger(total)||total!==rows.length)throw Error('화면 총건수와 보고서 응답 건수가 다릅니다.\n전체 목록으로 연결하세요.');
     const keys=[...new Set(rows.flatMap(Object.keys))];
     const named=keys.filter(k=>k!=='eduActPrcsStsNm'&&/(?:atrz|approval|appr).*(?:sts|status).*(?:nm|name)$/i.test(k));
     const observed=keys.filter(k=>k!=='eduActPrcsStsNm'&&rows.some(r=>['미상신','완결','상신(진행)','회수','반려'].includes(clean(r[k]))));

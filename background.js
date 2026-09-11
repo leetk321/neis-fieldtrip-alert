@@ -112,19 +112,18 @@ async function watchingNeis(connection){
 async function notify(rows,stage,connection,combined=[]) {
   const count=rows.length;
   if(!count)return true;
-  const c=connection.config;
-  const names={first:'새 신청 · 1차',reminder:'미상신 처리 확인 · 2차',departure:'체험 시작 예정 · 완결'};
+  const names={first:'[1차 알림]',reminder:'[2차 알림]',departure:'[교외체험학습 예정 알림]'};
   const combinedCount=stage==='reminder'?rows.filter(row=>combined.includes(row.key)).length:0;
-  const label=combinedCount===count?'미상신 처리 확인 · 1·2차 통합':combinedCount?'미상신 처리 확인':names[stage];
-  const title=`${c.grade}학년 ${c.classNo}반 · ${label}`;
-  let message=stage==='first'?`새로 확인한 신청서 ${count}건\n미상신 · 접수대기 / 접수취소\n나이스에서 신청서를 확인해 주세요.`:stage==='reminder'?`처리가 필요한 신청서 ${count}건\n체험 시작 5근무일 전 기준일 도달\n미상신 · 접수대기 / 접수취소`:`체험 시작을 앞둔 완결 신청서 ${count}건\n체험 시작 1근무일 전~시작일 당일 알림`;
-  if(combinedCount)message+=`\n처음 발견한 ${combinedCount}건은 1·2차를 합쳐 한 번 알립니다.`;
-  message+='\n\n대상 학생\n'+rows.map(r=>'• '+String(r.studentName||'이름 확인 필요').replace(/[\r\n\t]+/g,' ')+(stage==='departure'?'\n  체험기간: '+String(r.period||r.startDate||'기간 확인 필요').replace(/[\r\n\t]+/g,' '):'')).join('\n');
+  const title=combinedCount?'[1, 2차 통합 알림]':names[stage];
+  let message=stage==='first'?`새 교외체험학습 신청서 ${count}건`:stage==='reminder'?`아직 처리되지 않은 신청서 ${count}건\n(체험 시작 전 5근무일 이내)`:`체험 시작을 앞둔 학생 ${count}명\n(1근무일 전 알림)`;
+  if(combinedCount===count)message=`새 교외체험학습 신청서 ${count}건\n(체험 시작 전 5근무일 이내, 빠른 처리 필요)`;
+  else if(combinedCount)message+=`\n\n※ ${count}건 중 ${combinedCount}건은 새 신청서임`;
+  message+='\n\n'+rows.map(r=>'• '+String(r.studentName||'이름 확인 필요').replace(/[\r\n\t]+/g,' ')+(stage==='departure'?'\n  체험기간: '+String(r.period||r.startDate||'기간 확인 필요').replace(/[\r\n\t]+/g,' '):'')).join('\n');
   try {await logAlert(stage,title,message);} catch {return false;}
   if(!await watchingNeis(connection)){
     try{await chrome.notifications.create('trip-'+stage,{type:'basic',iconUrl:stage==='departure'?'icon-departure.png':'icon.png',title,message,priority:0});}catch{}
   }
-  await showPageNotice(connection,`${title}\n\n${message}`,stage);
+  await showPageNotice(connection,`${title}\n${message}`,stage);
   return true;
 }
 function validatedSnapshot(s) {
@@ -332,9 +331,9 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     if(message.type==='STOP'){const p=await profile();if(p)await chrome.storage.local.set({watchProfile:{...p,enabled:false}});await clearConnection('사용자가 감시와 자동 재개를 중지했습니다. 다시 연결하면 재개됩니다.');return {ok:true};}
     if(message.type==='RESET'){await reports.reset();await chrome.storage.local.remove(['history','alertHistories','alertLog']);return {ok:true,connected:!!(await session())};}
     if(message.type==='TEST') {
-      const title='교외체험학습 알림 표시 테스트',text='테스트 알림입니다. 실제 신청서 알림이 아닙니다. 신청서별 알림 이력에는 영향을 주지 않습니다.';
+      const title='[교외체험학습 알림 표시 테스트]',text='실제 신청서 알림이 아닙니다.\n신청서별 알림 이력에는 영향을 주지 않습니다.';
       await logAlert('test',title,text);
-      return {ok:true,pageShown:await showPageNotice(await session(),`${title} · ${text}`)};
+      return {ok:true,pageShown:await showPageNotice(await session(),`${title}\n${text}`)};
     }
     throw Error('지원하지 않는 요청입니다.');
   }).then(reply).catch(e=>reply({ok:false,error:e.message}));

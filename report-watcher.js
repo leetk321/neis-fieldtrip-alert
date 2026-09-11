@@ -25,11 +25,11 @@
       return validate(result.snapshot);
     }
     async function notify(rows,c){
-      const title=`${c.config.grade}학년 ${c.config.classNo}반 · 새 보고서`;
-      const message=`새로 확인한 교외체험학습 보고서 ${rows.length}건\n접수대기 · 미상신\n나이스 보고서관리에서 확인해 주세요.\n\n대상 학생\n`+rows.map(r=>'• '+String(r.studentName||'이름 확인 필요').replace(/[\r\n\t]+/g,' ').slice(0,100)).join('\n');
+      const title='[보고서 알림]';
+      const message=`새 교외체험학습 보고서 ${rows.length}건\n\n`+rows.map(r=>'• '+String(r.studentName||'이름 확인 필요').replace(/[\r\n\t]+/g,' ').slice(0,100)).join('\n');
       try{await logAlert('report',title,message);}catch{return false;}
       if(!await watchingNeis(c))try{await chrome.notifications.create('trip-report',{type:'basic',iconUrl:'icon-report.png',title,message,priority:0});}catch{}
-      await showPageNotice(c,`${title}\n\n${message}`,'report');return true;
+      await showPageNotice(c,`${title}\n${message}`,'report');return true;
     }
     async function apply(s,c){
       validate(s);
