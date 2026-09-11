@@ -39,10 +39,11 @@
   };
   const proto=XMLHttpRequest.prototype, open=proto.open, sendOriginal=proto.send, setHeader=proto.setRequestHeader;
   const meta=new WeakMap();
-  proto.open=function(method,url) {meta.set(this,{method,url,headers:{}}); return open.apply(this,arguments);};
-  proto.setRequestHeader=function(name,value) {const m=meta.get(this);if(m)m.headers[name]=value;return setHeader.apply(this,arguments);};
+  proto.open=function(method,url) {meta.delete(this);if(ticket(method,url,'{}',{}))meta.set(this,{method,url,headers:{}}); return open.apply(this,arguments);};
+  proto.setRequestHeader=function(name,value) {const m=meta.get(this);if(m&&headersAllowed.has(String(name).toLowerCase()))m.headers[String(name).toLowerCase()]=value;return setHeader.apply(this,arguments);};
   proto.send=function(body) {
     const m=meta.get(this), t=m && ticket(m.method,m.url,body,m.headers);
+    meta.delete(this);
     if(t)this.addEventListener('load',()=> {try {send(t,this.responseType==='json'?JSON.stringify(this.response):this.responseText,this.status);}catch{}},{once:true});
     return sendOriginal.apply(this,arguments);
   };

@@ -1,5 +1,5 @@
 'use strict';
-importScripts('calendar.js','core.js','holiday-sync.js');
+importScripts('calendar.js','core.js','holiday-sync.js','report-watcher.js');
 const holidaySync=HolidaySync.create(chrome.storage.local,TripCalendar,typeof fetch==='function'?fetch.bind(globalThis):undefined);
 const C=TripCore, ALARM='trip-poll';
 const defaults={year:C.schoolYear(),grade:'',classNo:'',interval:5,excludedDates:[]};
@@ -10,6 +10,8 @@ const serial=fn=>{const run=async()=>{await storageReady;return fn();};const p=q
 const session=async()=> (await chrome.storage.session.get('connection')).connection;
 const config=async()=> (await chrome.storage.local.get('config')).config||defaults;
 const profile=async()=> (await chrome.storage.local.get('watchProfile')).watchProfile;
+const consented=async()=> (await chrome.storage.local.get('privacyConsent')).privacyConsent?.version===1;
+const reports=TripReportWatcher.create({chrome,core:C,setup,consented,validatedProfile,logAlert,showPageNotice,watchingNeis});
 async function setup(){
   const value=await config();
   try{return {config:C.config(value),configured:true};}
@@ -53,6 +55,7 @@ function validatedProfile(value) {
   return value;
 }
 async function resumeFromPage(tabId,pageUrl,identity) {
+  if(!await consented())return {resumed:false};
   const saved=await profile();
   if(!saved?.enabled)return {resumed:false};
   let p;try{p=validatedProfile(saved);}catch(e){await clearConnection('자동 연결 정보 오류 · '+e.message);return {resumed:false};}
@@ -72,6 +75,7 @@ async function resumeFromPage(tabId,pageUrl,identity) {
   return {resumed:false};
 }
 async function probeOpenTabs(){
+  if(!await consented())return;
   const saved=await profile();if(!saved?.enabled)return;
   const tabs=await chrome.tabs.query({url:'https://*.neis.go.kr/*'});
   for(const tab of tabs){
@@ -107,6 +111,7 @@ function validatedSnapshot(s) {
   return s;
 }
 async function requestSnapshot(connection) {
+  if(!await consented())throw Error('1.5.4 개인정보 처리 안내에 동의한 뒤 다시 연결하세요.');
   const response=await chrome.tabs.sendMessage(connection.tabId,{type:'POLL',...connection});
   if(!response?.ok)throw Error(response?.error||'나이스 탭을 새로고침하고 다시 연결하세요.');
   return validatedSnapshot(response.snapshot);
@@ -176,11 +181,13 @@ async function prepareHolidays(){
   await holidaySync.refresh().catch(()=>{});
 }
 chrome.alarms.onAlarm.addListener(a=>{
+  if(a.name===reports.ALARM)return serial(reports.poll);
   if(a.name===ALARM)return serial(poll);
   if(a.name===HOLIDAY_ALARM)return serial(()=>holidaySync.refresh().catch(()=>{}));
 });
 chrome.runtime.onInstalled.addListener(details=>serial(async()=>{
   await prepareHolidays();
+  await reports.startup();
   const current=await setup();
   const saved=await profile();
   if(current.configured&&saved?.enabled){await waitForNeis('로그인된 나이스 탭이 열리면 감시를 자동으로 재개합니다.');await probeOpenTabs();}
@@ -189,10 +196,12 @@ chrome.runtime.onInstalled.addListener(details=>serial(async()=>{
 }));
 chrome.runtime.onStartup.addListener(()=>serial(async()=>{
   await prepareHolidays();
+  await reports.startup();
   if((await profile())?.enabled){await waitForNeis('로그인된 나이스 탭을 찾고 있습니다.');await probeOpenTabs();}
   else await clearConnection('자동 재개가 꺼져 있습니다. 나이스에서 조회를 다시 연결하면 켜집니다.');
 }));
 chrome.tabs.onRemoved.addListener(tabId=>serial(async()=>{
+  await reports.removed(tabId);
   if((await session())?.tabId!==tabId)return;
   if((await profile())?.enabled)await waitForNeis('나이스 탭이 다시 열리면 감시를 자동으로 재개합니다.');
   else await clearConnection('연결된 나이스 탭이 닫혔습니다.');
@@ -202,12 +211,21 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
   serial(async()=>{
     const internal=sender.id===chrome.runtime.id&&!sender.tab;
     const page=sender.id===chrome.runtime.id&&sender.frameId===0&&/^https:\/\/[^/]+\.neis\.go\.kr\//.test(sender.url||'');
+    const reportResult=await reports.handle(message,sender,internal,page);if(reportResult)return reportResult;
+    if(message.type==='CAN_IDENTIFY'){
+      if(!page)throw Error('잘못된 발신자입니다.');
+      const saved=await profile();
+      return {ok:true,allowed:!!(await consented()&&saved?.enabled===true&&saved.origin===new URL(sender.url).origin)||await reports.canIdentify(sender.url)};
+    }
     if(message.type==='PAGE_READY') {
       if(!page)throw Error('잘못된 발신자입니다.');
-      return {ok:true,...await resumeFromPage(sender.tab.id,sender.url,message.identity)};
+      const application=await resumeFromPage(sender.tab.id,sender.url,message.identity);
+      const report=await reports.resume(sender.tab.id,sender.url,message.identity);
+      return {ok:true,...application,reportResumed:report.resumed};
     }
     if(message.type==='CAPTURE'||message.type==='CAPTURE_ERROR') {
       if(!page)throw Error('잘못된 발신자입니다.');
+      if(!await consented())throw Error('개인정보 처리 안내에 동의한 뒤 연결하세요.');
       const arm=(await chrome.storage.session.get('arm')).arm;
       if(!arm||arm.tabId!==sender.tab.id||Date.now()>arm.until)throw Error('연결 시간이 지났습니다. 다시 시작하세요.');
       if(message.type==='CAPTURE_ERROR'){await status({state:'connecting',message:message.error});return {ok:true};}
@@ -224,21 +242,27 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     }
     if(!internal)throw Error('확장 프로그램에서만 실행할 수 있습니다.');
     if(message.type==='STATE') {
+      const reportState=await reports.getState();
       const stored=await chrome.storage.local.get(['status','alertLog','holidayCache']);
       const saved=stored.status;
       const conn=await session();
       const current=await setup();
       const savedProfile=await profile();
-      return {ok:true,...current,holidayInfo:{updatedAt:stored.holidayCache?.updatedAt||null,years:stored.holidayCache?.years||[],failed:!!stored.holidayCache?.error},status:!current.configured?{state:'setup',message:'먼저 알림을 받을 학년도·학년·반을 설정하고 저장하세요.'}:saved?.state==='paused'||saved?.state==='connecting'?saved:!conn&&savedProfile?.enabled?{state:'waiting',message:'로그인된 나이스 탭이 열리면 자동으로 감시를 재개합니다.'}:!conn&&saved?.state==='watching'?{state:'disconnected',message:'연결을 다시 시작하세요.'}:saved,connected:!!conn,autoStart:savedProfile?.enabled===true,alertLog:Array.isArray(stored.alertLog)?stored.alertLog.slice(0,20):[]};
+      return {ok:true,...current,report:reportState,privacyConsented:await consented(),holidayInfo:{updatedAt:stored.holidayCache?.updatedAt||null,years:stored.holidayCache?.years||[],failed:!!stored.holidayCache?.error},status:!await consented()?{state:'disconnected',message:'개인정보 처리 안내에 동의하고 나이스 조회를 다시 연결하세요.'}:!current.configured?{state:'setup',message:'먼저 알림을 받을 학년도·학년·반을 설정하고 저장하세요.'}:saved?.state==='paused'||saved?.state==='connecting'?saved:!conn&&savedProfile?.enabled?{state:'waiting',message:'로그인된 나이스 탭이 열리면 자동으로 감시를 재개합니다.'}:!conn&&saved?.state==='watching'?{state:'disconnected',message:'연결을 다시 시작하세요.'}:saved,connected:!!conn,autoStart:savedProfile?.enabled===true,alertLog:Array.isArray(stored.alertLog)?stored.alertLog.slice(0,20):[]};
     }
     if(message.type==='SAVE') {
       const next=C.config(message.config);
+      await reports.invalidate();
       await chrome.storage.local.set({config:next});
       await chrome.storage.local.remove('watchProfile');
       await clearConnection('설정이 저장되었습니다. 나이스 조회 조건을 맞춘 뒤 다시 연결하세요.');
       return {ok:true};
     }
     if(message.type==='ARM') {
+      if(!await consented()){
+        if(message.consent!==true)throw Error('개인정보 처리 안내를 읽고 동의해 주세요.');
+        await chrome.storage.local.set({privacyConsent:{version:1,acceptedAt:Date.now()}});
+      }
       const current=await setup();
       if(!current.configured)throw Error('먼저 학년도·학년·반을 설정하고 저장하세요.');
       const tabs=await chrome.tabs.query({active:true,currentWindow:true});const tab=tabs[0];
@@ -246,6 +270,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       const c=current.config,nonce=crypto.randomUUID();
       const result=await chrome.tabs.sendMessage(tab.id,{type:'ARM',config:c,nonce});
       if(!result.ok)throw Error(result.error);
+      await chrome.storage.session.remove('reportArm');
       await clearConnection('연결 준비 중');
       await chrome.storage.session.set({arm:{tabId:tab.id,nonce,identity:result.identity,config:c,until:Date.now()+60000}});
       await status({state:'connecting',message:'60초 안에 나이스의 조회 버튼을 눌러 주세요.'});
@@ -264,7 +289,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       return {ok:true,count:snapshot.count,total:snapshot.total,awaitingSchema:snapshot.awaitingSchema,needsConfirmation:snapshot.needsConfirmation,checkedAt:Date.now()};
     }
     if(message.type==='STOP'){const p=await profile();if(p)await chrome.storage.local.set({watchProfile:{...p,enabled:false}});await clearConnection('사용자가 감시와 자동 재개를 중지했습니다. 다시 연결하면 재개됩니다.');return {ok:true};}
-    if(message.type==='RESET'){await chrome.storage.local.remove(['history','alertHistories','alertLog']);return {ok:true,connected:!!(await session())};}
+    if(message.type==='RESET'){await reports.reset();await chrome.storage.local.remove(['history','alertHistories','alertLog']);return {ok:true,connected:!!(await session())};}
     if(message.type==='TEST') {
       const title='교외체험학습 알림 표시 테스트',text='테스트 알림입니다. 실제 신청서 알림이 아닙니다. 신청서별 알림 이력에는 영향을 주지 않습니다.';
       await logAlert('test',title,text);

@@ -2,20 +2,27 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),vm=requir
 const dir=path.resolve(__dirname,'..');
 const rec=(key='b',receipt='접수대기',unsubmitted=true,startDate='2026-09-14')=>({key:key.repeat(64),receipt,unsubmitted,startDate});
 function harness(savedConfig={year:'2026',grade:'2',classNo:'3',interval:5},denyStorage=false,holidayFetch){
- const data={local:savedConfig?{config:savedConfig}:{},session:{}},listeners={},alarms=new Map(),notifications=[],osNotifications=[],pageMessages=[],tabsCreated=[];
+ const data={local:{...(savedConfig?{config:savedConfig}:{}),privacyConsent:{version:1,acceptedAt:1}},session:{}},listeners={},alarms=new Map(),notifications=[],osNotifications=[],pageMessages=[],tabsCreated=[];
  const storage=kind=>({setAccessLevel:async value=>{if(denyStorage)throw Error('storage restriction failed');data.accessLevel=value.accessLevel;},get:async key=>typeof key==='string'?{[key]:structuredClone(data[kind][key])}:structuredClone(data[kind]),set:async values=>{if(kind==='local'&&values.alertLog){const item=values.alertLog[0];if(item&&item.kind!=='test'&&!notifications.some(n=>n.id===item.id))notifications.push({...item,n:'trip-'+item.kind});}return Object.assign(data[kind],structuredClone(values));},remove:async keys=>{for(const k of [].concat(keys))delete data[kind][k];}});
  const event=name=>({addListener:fn=>listeners[name]=fn});
  let foreground=true,minimized=false;
- let snapshot={records:[rec()],count:1,total:2},fail=false,notificationFail=false,whoIdentity='a'.repeat(64),now=Date.parse('2026-09-01T01:00:00Z');
+ let snapshot={records:[rec()],count:1,total:2},reportSnapshot={reports:[],count:0,total:0},reportFail=false,fail=false,notificationFail=false,whoIdentity='a'.repeat(64),now=Date.parse('2026-09-01T01:00:00Z');
  class Clock extends Date{constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
  const chrome={storage:{local:storage('local'),session:storage('session')},action:{setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{}},alarms:{clear:async n=>alarms.delete(n),create:async(n,o)=>alarms.set(n,o),onAlarm:event('alarm')},notifications:{create:async(n,o)=>{if(notificationFail)throw Error('notification unavailable');osNotifications.push({n,...o});},onClicked:event('notification')},windows:{get:async()=>({focused:foreground,state:minimized?'minimized':'normal'}),update:async()=>{}},tabs:{get:async()=>({active:foreground,windowId:1}),query:async()=>[{id:123,url:'https://goe.neis.go.kr/jsp/main.jsp'}],sendMessage:async(id,msg)=>{pageMessages.push(msg);return msg.type==='ARM'?{ok:true,identity:'a'.repeat(64)}:msg.type==='WHO'?{ok:true,identity:whoIdentity}:msg.type==='NOTICE'?{ok:true}:fail?{ok:false,error:'로그인 만료'}:{ok:true,snapshot};},create:async options=>{tabsCreated.push(options);return {id:999,...options};},onRemoved:event('removed'),update:async()=>({windowId:1})},runtime:{id:'test-extension',getURL:path=>'chrome-extension://test-extension/'+path,onInstalled:event('installed'),onStartup:event('startup'),onMessage:event('message')}};
+ const originalSend=chrome.tabs.sendMessage;
+ chrome.tabs.sendMessage=async(id,msg)=>msg.type==='POLL'&&msg.kind==='report'?(reportFail?{ok:false,error:'보고서 조회 실패'}:{ok:true,snapshot:reportSnapshot}):originalSend(id,msg);
  const context=vm.createContext({chrome,crypto:webcrypto,URL,console,fetch:holidayFetch,AbortController,TextDecoder,Date:Clock,setTimeout,clearTimeout,structuredClone});
  context.importScripts=(...files)=>files.forEach(f=>vm.runInContext(fs.readFileSync(path.join(dir,f),'utf8'),context));
  vm.runInContext(fs.readFileSync(path.join(dir,'background.js'),'utf8'),context);
  const send=(message,sender={id:'test-extension'})=>new Promise(resolve=>listeners.message(message,sender,resolve));
  const page={id:'test-extension',frameId:0,url:'https://goe.neis.go.kr/jsp/main.jsp',tab:{id:123}};
  async function connect(){await send({type:'ARM'});const arm=data.session.arm;return send({type:'CAPTURE',nonce:arm.nonce,identity:arm.identity,template:{endpoint:'/observed.do',body:'{"data":{}}',headers:{'content-type':'application/json'},schema:{identityMode:'신청서 식별값'}},snapshot},page);}
- return {osNotifications,setForeground:v=>foreground=v,setMinimized:v=>minimized=v,send,connect,data,alarms,notifications,pageMessages,tabsCreated,page,install:reason=>listeners.installed(reason?{reason}:undefined),startup:()=>listeners.startup(),alarm:name=>listeners.alarm({name}),removeTab:id=>listeners.removed(id),history:()=>Object.values(data.local.alertHistories||{})[0],setRecords:records=>snapshot={records,count:records.filter(r=>r.unsubmitted).length,total:records.length},setDepartures:departures=>snapshot.departures=departures,setSnapshot:v=>snapshot=v,setNow:date=>now=Date.parse(date+'T01:00:00Z'),setFail:()=>fail=true,setWho:value=>whoIdentity=value,setNotificationFail:value=>notificationFail=value};
+ async function connectReport(s=reportSnapshot){
+   const prepared=await send({type:'REPORT_ARM',consent:true});assert.equal(prepared.ok,true,prepared.error);
+   const a=data.session.reportArm;
+   return send({type:'REPORT_CAPTURE',nonce:a.nonce,identity:a.identity,template:{endpoint:'/report.do',body:'{}',headers:{},schema:{kind:'report',identityMode:'보고서 식별값'}},snapshot:s},page);
+ }
+ return {connectReport,setReportSnapshot:v=>reportSnapshot=v,setReportFail:()=>reportFail=true,osNotifications,setForeground:v=>foreground=v,setMinimized:v=>minimized=v,send,connect,data,alarms,notifications,pageMessages,tabsCreated,page,install:reason=>listeners.installed(reason?{reason}:undefined),startup:()=>listeners.startup(),alarm:name=>listeners.alarm({name}),removeTab:id=>listeners.removed(id),history:()=>Object.values(data.local.alertHistories||{})[0],setRecords:records=>snapshot={records,count:records.filter(r=>r.unsubmitted).length,total:records.length},setDepartures:departures=>snapshot.departures=departures,setSnapshot:v=>snapshot=v,setNow:date=>now=Date.parse(date+'T01:00:00Z'),setFail:()=>fail=true,setWho:value=>whoIdentity=value,setNotificationFail:value=>notificationFail=value};
 }
 test('connection starts alarm and persists stage flags and automatic profile',async()=>{const h=harness();assert.equal((await h.connect()).ok,true);assert.equal(h.alarms.get('trip-poll').periodInMinutes,5);assert.equal(h.history()['b'.repeat(64)].firstSent,true);assert.equal(h.data.local.connection,undefined);assert.equal(h.data.local.watchProfile.enabled,true);assert.equal(h.data.local.watchProfile.origin,'https://goe.neis.go.kr');assert.equal(h.data.local.watchProfile.template.headers.cookie,undefined);assert.equal(h.notifications.length,1);assert.equal(JSON.stringify(h.history()).includes('2026-09-14'),false);});
 test('unchanged polls deduplicate and new application triggers first alert',async()=>{const h=harness();await h.connect();await h.send({type:'CHECK'});assert.equal(h.notifications.length,1);h.setRecords([rec('c')]);await h.send({type:'CHECK'});assert.equal(h.notifications.length,2);});
@@ -66,3 +73,74 @@ test('storage restriction failure blocks actions rather than using unrestricted 
 test('public holiday download failure never stops NEIS alerts',async()=>{const h=harness(undefined,false,async()=>{throw Error('offline');});await h.install('update');await h.connect();assert.equal(h.data.local.status.state,'watching');assert.equal(h.notifications.length,1);assert.ok(h.data.local.holidayCache.error);assert.equal(h.alarms.has('trip-poll'),true);});
 
 test('holiday prefetch works without NEIS configuration and survives EVPN offline startup',async()=>{let calls=0,offline=false;const dates=Object.fromEntries(['01-01','02-01','02-02','03-01','05-05','06-06','08-15','10-03','10-09','12-25'].map(d=>['2027-'+d,['공휴일']]));const h=harness(null,false,async()=>{calls++;if(offline)throw Error('EVPN offline');return new Response(JSON.stringify({'2027':dates}));});await h.install('install');assert.equal(calls,1);assert.ok(h.data.local.holidayCache.data['2027']);assert.equal(h.data.local.config,undefined);assert.equal(h.alarms.get('holiday-refresh').periodInMinutes,60);await h.alarm('holiday-refresh');assert.equal(calls,1);offline=true;h.setNow('2026-09-03');await h.startup();assert.equal(calls,2);assert.ok(h.data.local.holidayCache.data['2027']);assert.ok(h.data.local.holidayCache.error);assert.equal(h.alarms.has('trip-poll'),false);});
+
+test('privacy consent blocks identity probes and old sessions until affirmative action',async()=>{
+ const h=harness();await h.connect();delete h.data.local.privacyConsent;
+ const before=h.pageMessages.length;
+ assert.equal((await h.send({type:'CAN_IDENTIFY'},h.page)).allowed,false);
+ await h.startup();assert.equal(h.pageMessages.length,before);
+ assert.equal((await h.send({type:'ARM'})).ok,false);
+ assert.equal((await h.send({type:'STATE'})).privacyConsented,false);
+ assert.equal((await h.send({type:'ARM',consent:true})).ok,true);
+ assert.equal(h.data.local.privacyConsent.version,1);
+});
+test('content scripts cannot grant privacy consent',async()=>{
+ const h=harness();delete h.data.local.privacyConsent;
+ assert.equal((await h.send({type:'ARM',consent:true},h.page)).ok,false);
+ assert.equal(h.data.local.privacyConsent,undefined);
+});
+
+const reportFixture=(key='b')=>({reports:[{key:key.repeat(64),receipt:'접수대기',unsubmitted:true,studentName:'보고서예시'}],count:1,total:1});
+test('report connection coexists with applications and deduplicates by independent report history',async()=>{
+ const h=harness();await h.connect();h.setReportSnapshot(reportFixture());assert.equal((await h.connectReport()).ok,true);
+ assert.ok(h.data.session.connection);assert.ok(h.data.session.reportConnection);
+ assert.ok(h.alarms.has('trip-poll'));assert.ok(h.alarms.has('trip-report-poll'));
+ assert.equal(h.notifications.filter(n=>n.kind==='report').length,1);
+ await h.send({type:'REPORT_CHECK'});assert.equal(h.notifications.filter(n=>n.kind==='report').length,1);
+ h.setReportSnapshot({reports:[],count:0,total:0});await h.send({type:'REPORT_CHECK'});
+ h.setReportSnapshot(reportFixture());await h.send({type:'REPORT_CHECK'});assert.equal(h.notifications.filter(n=>n.kind==='report').length,1);
+ h.setReportSnapshot(reportFixture('c'));await h.alarm('trip-report-poll');assert.equal(h.notifications.filter(n=>n.kind==='report').length,2);
+ assert.match(h.notifications.find(n=>n.kind==='report').message,/보고서예시/);
+ assert.ok(h.pageMessages.some(m=>m.type==='NOTICE'&&m.kind==='report'));
+});
+test('report network failures and stopping do not stop application polling',async()=>{
+ const h=harness();await h.connect();await h.connectReport();h.setReportFail();await h.send({type:'REPORT_CHECK'});
+ assert.ok(h.alarms.has('trip-poll'));assert.ok(h.data.session.connection);assert.equal(h.data.local.reportStatus.state,'paused');
+ await h.send({type:'REPORT_STOP'});assert.equal(h.data.local.reportProfile.enabled,false);assert.equal(h.data.local.watchProfile.enabled,true);
+});
+test('report-only automatic resume verifies origin account and consent',async()=>{
+ const h=harness();h.setReportSnapshot(reportFixture());await h.connectReport();
+ assert.equal((await h.send({type:'CAN_IDENTIFY'},h.page)).allowed,true);
+ await h.startup();assert.equal(h.data.session.reportConnection.automatic,true);assert.equal(h.notifications.length,1);
+ h.setWho('d'.repeat(64));await h.startup();assert.equal(h.data.session.reportConnection,undefined);
+});
+test('report query test never consumes first alert and RESET preserves both connections',async()=>{
+ const h=harness();await h.connect();await h.connectReport();h.setReportSnapshot(reportFixture());
+ await h.send({type:'REPORT_QUERY_TEST'});assert.equal(h.data.local.reportHistories,undefined);
+ await h.send({type:'REPORT_CHECK'});assert.ok(h.data.local.reportHistories);
+ await h.send({type:'RESET'});assert.equal(h.data.local.reportHistories,undefined);assert.ok(h.data.session.connection);assert.ok(h.data.session.reportConnection);
+ await h.send({type:'REPORT_CHECK'});assert.equal(h.data.local.alertLog[0].kind,'report');
+});
+test('report consent and capture nonce required; foreign callers cannot opt in',async()=>{
+ const h=harness();assert.equal((await h.send({type:'REPORT_ARM'})).ok,false);
+ assert.equal((await h.send({type:'REPORT_ARM',consent:true},h.page)).ok,false);
+ await h.send({type:'REPORT_ARM',consent:true});const a=h.data.session.reportArm;
+ assert.equal((await h.send({type:'REPORT_CAPTURE',nonce:'bad',identity:a.identity},h.page)).ok,false);
+ assert.equal(h.data.local.reportProfile,undefined);
+});
+test('report alert uses orange icon when NEIS tab is not being watched',async()=>{
+ const h=harness();h.setForeground(false);h.setReportSnapshot(reportFixture());await h.connectReport();
+ assert.equal(h.osNotifications[0].iconUrl,'icon-report.png');assert.equal(h.osNotifications[0].n,'trip-report');
+});
+test('shared configuration invalidates both saved connections',async()=>{
+ const h=harness();await h.connect();await h.connectReport();await h.send({type:'SAVE',config:{year:'2026',grade:'2',classNo:'4',interval:5}});
+ assert.equal(h.data.local.reportProfile,undefined);assert.equal(h.data.local.watchProfile,undefined);assert.equal(h.data.session.reportConnection,undefined);
+});
+test('a report schema learned from empty capture is stored before future automatic checks',async()=>{
+ const h=harness();await h.send({type:'REPORT_ARM',consent:true});const a=h.data.session.reportArm;
+ const empty={reports:[],count:0,total:0,awaitingSchema:true};h.setReportSnapshot(empty);
+ const result=await h.send({type:'REPORT_CAPTURE',nonce:a.nonce,identity:a.identity,template:{endpoint:'/report.do',body:'{}',headers:{},schema:{kind:'report',pending:true,path:['rows'],totalPath:['totalCount']}},snapshot:empty},h.page);
+ assert.equal(result.ok,true);assert.equal(h.data.local.reportStatus.state,'learning');
+ h.setReportSnapshot({...reportFixture(),learnedSchema:{kind:'report',path:['rows'],identity:['rptSn'],approval:'atrzStsNm'}});
+ await h.send({type:'REPORT_CHECK'});assert.equal(h.data.local.reportProfile.template.schema.pending,undefined);assert.equal(h.notifications.length,1);
+});

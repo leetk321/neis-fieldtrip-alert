@@ -1,12 +1,16 @@
 'use strict';
 const $=id=>document.getElementById(id);
 let initialized=false, dirty=false, configured=false, connected=false, busy=false;
+let reportConnected=false;
 const labels={learning:'신청서 학습 대기',setup:'처음 설정',watching:'감시 중',paused:'확인 필요',waiting:'나이스 대기',disconnected:'연결 필요',connecting:'연결 중'};
 function controls(){
   document.querySelectorAll('button').forEach(b=>b.disabled=busy);
   $('connect').disabled=busy||!configured;
   $('check').disabled=busy||!connected;
   $('queryTest').disabled=busy||!connected;
+  $('reportConnect').disabled=busy||!configured;
+  $('reportCheck').disabled=busy||!reportConnected;
+  $('reportQueryTest').disabled=busy||!reportConnected;
 }
 function renderAlerts(items){
   const box=$('alertLog');box.replaceChildren();
@@ -22,7 +26,15 @@ async function request(message){const result=await chrome.runtime.sendMessage(me
 async function refresh(){
   try {
     const data=await request({type:'STATE'}),s=data.status||{};
+    $('consentBox').hidden=data.privacyConsented===true;
     configured=data.configured===true;connected=data.connected===true;
+    const report=data.report||{},rs=report.status||{};
+    reportConnected=report.connected===true;
+    $('reportConsentBox').hidden=report.privacyConsented===true;
+    $('reportState').textContent=(rs.state==='learning'?'보고서 학습 대기':labels[rs.state]||'연결 필요')+(rs.count==null?'':' · '+rs.count+'건');
+    $('reportStatus').textContent=rs.message||'보고서관리에서 조회를 별도로 연결하세요.';
+    $('reportChecked').textContent=rs.lastCheck?'마지막 성공 조회 '+new Date(rs.lastCheck).toLocaleString('ko-KR'):'';
+    $('reportAuto').textContent='보고서 자동 재개: '+(report.autoStart?'켜짐':'꺼짐');
     $('setupNotice').hidden=configured;
     $('save').textContent=configured?'설정 저장':'설정 완료';
     controls();
@@ -49,7 +61,19 @@ async function action(type,extra={}){
 }
 $('settings').addEventListener('input',()=>dirty=true);
 $('settings').addEventListener('submit',async e=>{e.preventDefault();const c={};for(const id of ['year','grade','classNo','interval'])c[id]=$(id).value;c.excludedDates=$('excludedDates').value;if(await action('SAVE',{config:c}))dirty=false;});
-$('connect').onclick=()=>{if(dirty){$('message').textContent='변경한 설정을 먼저 저장하세요.';$('message').focus({preventScroll:true});$('message').scrollIntoView({block:'center'});}else action('ARM');};
+$('connect').onclick=()=>{if(dirty){$('message').textContent='변경한 설정을 먼저 저장하세요.';$('message').focus({preventScroll:true});$('message').scrollIntoView({block:'center'});}else if(!$('consentBox').hidden&&!$('privacyAgree').checked){$('message').textContent='연결 전 개인정보 처리 안내를 읽고 동의해 주세요.';$('consentBox').scrollIntoView({block:'center'});$('privacyAgree').focus();}else action('ARM',{consent:$('privacyAgree').checked});};
 for(const [id,type] of [['queryTest','QUERY_TEST'],['check','CHECK'],['stop','STOP'],['test','TEST'],['reset','RESET']])$(id).onclick=()=>action(type);
+async function reportAction(type){
+  const message=$('reportMessage');
+  if(type==='REPORT_ARM'&&dirty){message.textContent='변경한 설정을 먼저 저장하세요.';message.focus();return;}
+  if(type==='REPORT_ARM'&&!$('reportConsentBox').hidden&&!$('reportAgree').checked){message.textContent='보고서 정보 처리 안내를 읽고 동의해 주세요.';$('reportAgree').focus();return;}
+  busy=true;controls();message.textContent='보고서를 확인하고 있습니다…';
+  try{
+    const result=await request({type,consent:$('reportAgree').checked});await refresh();
+    message.textContent=type==='REPORT_ARM'?'보고서 연결 준비 완료 · 60초 안에 진행해 주세요.\n① 팝업을 닫으세요.\n② 보고서관리 화면의 조회를 누르세요.':type==='REPORT_STOP'?'보고서 감시와 자동 재개를 중지했습니다.':type==='REPORT_QUERY_TEST'?(result.awaitingSchema?(result.needsConfirmation?'보고서 발견 · 전체 건수 확인을 위해 다시 연결하세요.':'정상 빈 응답 · 첫 보고서 학습 대기'):`보고서 조회 성공 · 접수대기·미상신 ${result.count}건\n알림 이력은 변경하지 않았습니다.`):'보고서 확인을 마쳤습니다. 위 상태와 최근 알림을 확인하세요.';
+  }catch(e){message.textContent=e.message.includes('Receiving end')?'나이스 탭을 새로고침하고 보고서를 다시 연결하세요.':e.message;}
+  finally{busy=false;controls();message.focus({preventScroll:true});message.scrollIntoView({block:'center'});}
+}
+for(const [id,type]of [['reportConnect','REPORT_ARM'],['reportCheck','REPORT_CHECK'],['reportQueryTest','REPORT_QUERY_TEST'],['reportStop','REPORT_STOP']])$(id).onclick=()=>reportAction(type);
 chrome.storage.onChanged.addListener(()=>refresh());
 refresh();

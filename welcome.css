@@ -10,3 +10,4 @@
 dl{grid-template-columns:minmax(0,210px) minmax(0,1fr);column-gap:24px}
 dt,dd{min-width:0;overflow-wrap:anywhere}
 @media(max-width:600px){dl{grid-template-columns:minmax(0,1fr)}}
+.report-guide{padding:16px;background:#fff0e1;border:1px solid #e8c9ac;border-radius:10px;color:#994210}
