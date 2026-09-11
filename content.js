@@ -24,8 +24,16 @@
     panel=current;current.setAttribute('data-neis-trip-notice','');
     Object.assign(current.style,{position:'fixed',right:'24px',bottom:'64px',zIndex:'2147483647',background:next.kind==='report'?'#ad4f15':next.kind==='departure'?'#643da5':'#123c46',color:'white',padding:'16px',borderRadius:'12px',boxSizing:'border-box',maxWidth:'min(410px, calc(100vw - 48px))',maxHeight:'60vh',display:'grid',gridTemplateColumns:'minmax(0, 1fr) 24px',gridTemplateRows:'minmax(0, 1fr)',columnGap:'10px',overflow:'hidden',font:'14px/1.8 sans-serif',boxShadow:'0 8px 30px #0003'});
     const close=document.createElement('button'),body=document.createElement('div');
-    close.type='button';close.textContent='x';close.setAttribute('aria-label','알림 닫기');close.title='알림 닫기';
-    Object.assign(close.style,{all:'initial',boxSizing:'border-box',gridColumn:'2',gridRow:'1',alignSelf:'start',display:'inline-flex',alignItems:'center',justifyContent:'center',width:'24px',height:'24px',padding:'0',border:'1px solid #ffffff80',borderRadius:'50%',background:'#ffffff1a',color:'white',font:'600 15px/1 sans-serif',cursor:'pointer'});
+    close.type='button';close.setAttribute('aria-label','알림 닫기');close.title='알림 닫기';
+    Object.assign(close.style,{all:'initial',boxSizing:'border-box',gridColumn:'2',gridRow:'1',alignSelf:'start',display:'inline-flex',alignItems:'center',justifyContent:'center',width:'24px',height:'24px',padding:'0',border:'1px solid #ffffff80',borderRadius:'50%',background:'#ffffff1a',color:'white',cursor:'pointer'});
+    // Draw the cross geometrically; font baselines can make a text x look low and heavy.
+    const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');
+    icon.setAttribute('viewBox','0 0 12 12');icon.setAttribute('aria-hidden','true');icon.setAttribute('focusable','false');
+    Object.assign(icon.style,{all:'initial',display:'block',width:'12px',height:'12px',flexShrink:'0',pointerEvents:'none'});
+    const strokes=document.createElementNS('http://www.w3.org/2000/svg','path');
+    strokes.setAttribute('d','M2.5 2.5L9.5 9.5M9.5 2.5L2.5 9.5');
+    Object.assign(strokes.style,{fill:'none',stroke:'white',strokeWidth:'1.25',strokeLinecap:'round'});
+    icon.appendChild(strokes);close.appendChild(icon);
     body.setAttribute('role','status');body.textContent=next.text;
     // Reserve a separate column beside the text so even wrapped/scrolled content cannot overlap x.
     Object.assign(body.style,{gridColumn:'1',gridRow:'1',minWidth:'0',minHeight:'0',overflowY:'auto',overscrollBehavior:'contain',whiteSpace:'pre-line',overflowWrap:'anywhere'});

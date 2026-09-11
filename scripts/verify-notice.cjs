@@ -31,14 +31,15 @@ const root=path.resolve(__dirname,'..'),version=JSON.parse(fs.readFileSync(path.
     const checkLayout=async()=>{
       const layout=await notice.evaluate(el=>{
         const button=el.querySelector('button'),body=el.querySelector('[role="status"]');
-        const b=button.getBoundingClientRect(),t=body.getBoundingClientRect(),p=el.getBoundingClientRect();
+        const b=button.getBoundingClientRect(),t=body.getBoundingClientRect(),p=el.getBoundingClientRect(),icon=button.querySelector('svg').getBoundingClientRect();
         const range=document.createRange();range.selectNodeContents(body);
         const overlaps=Array.from(range.getClientRects()).some(r=>r.left<b.right&&r.right>b.left&&r.top<b.bottom&&r.bottom>b.top);
-        return {sameRow:Math.abs(t.top-b.top)<1,gap:b.left-t.right,inside:b.right<=p.right&&b.top>=p.top,width:b.width,height:b.height,radius:getComputedStyle(button).borderRadius,text:button.textContent,overlaps};
+        return {sameRow:Math.abs(t.top-b.top)<1,gap:b.left-t.right,inside:b.right<=p.right&&b.top>=p.top,width:b.width,height:b.height,radius:getComputedStyle(button).borderRadius,centered:Math.abs(icon.x+icon.width/2-b.x-b.width/2)<0.1&&Math.abs(icon.y+icon.height/2-b.y-b.height/2)<0.1,iconWidth:icon.width,iconHeight:icon.height,overlaps};
       });
       assert.ok(layout.sameRow,'Close button must share the first text row');
       assert.ok(layout.gap>=9&&layout.inside&&!layout.overlaps,'Text must never overlap the close button');
-      assert.equal(layout.text,'x');assert.equal(layout.width,24);assert.equal(layout.height,24);assert.equal(layout.radius,'50%');
+      assert.ok(layout.centered,'Cross must stay centered in the circular button');assert.equal(layout.iconWidth,12);assert.equal(layout.iconHeight,12);
+      assert.equal(layout.width,24);assert.equal(layout.height,24);assert.equal(layout.radius,'50%');
     };
     for(const [kind,color] of [['first','rgb(18, 60, 70)'],['reminder','rgb(18, 60, 70)'],['departure','rgb(100, 61, 165)'],['report','rgb(173, 79, 21)'],['info','rgb(18, 60, 70)']]){
       await show(kind,'가상 알림\n대상 학생: 예시학생');
@@ -59,6 +60,11 @@ const root=path.resolve(__dirname,'..'),version=JSON.parse(fs.readFileSync(path.
     assert.deepEqual(await state(),before);
     if(process.env.NOTICE_SCREENSHOT){await notice.locator('[role="status"]').evaluate(el=>el.scrollTop=0);await page.screenshot({path:process.env.NOTICE_SCREENSHOT});}
     await close.click();
+    if(process.env.NOTICE_SCREENSHOT){
+      await show('info','연결 완료 · 현재 미상신 0건 (접수취소 포함). 접수대기·접수취소 신규 신청과 5근무일 전 알림을 확인합니다.');
+      await checkLayout();
+      await notice.screenshot({path:process.env.NOTICE_SCREENSHOT.replace(/\.png$/, '-detail.png')});await close.click();
+    }
     // Keyboard dismissal returns to the former input without moving its caret or scrolling.
     for(const key of ['Enter','Space']){
       await show('departure','완결 신청서\n체험기간: 예시 기간');await close.focus();
