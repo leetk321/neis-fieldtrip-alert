@@ -2,7 +2,7 @@
 (function(root){
   'use strict';
   function create(env){
-    const {chrome,core:C,setup,validatedProfile,deliverAlert}=env;
+    const {chrome,core:C,setup,validatedProfile,deliverAlert,pageNotices,copyAlert}=env;
     const ALARM='trip-report-poll';
     const local=chrome.storage.local,sessionStore=chrome.storage.session;
     const read=async(store,key)=>(await store.get(key))[key];
@@ -12,6 +12,7 @@
     const status=s=>local.set({reportStatus:{...s,updatedAt:Date.now()}});
     const schedule=c=>chrome.alarms.create(ALARM,{periodInMinutes:c.config.interval,delayInMinutes:c.config.interval});
     async function disconnect(message,state='disconnected'){
+      if(await consented())await pageNotices.clear(await connection());
       await chrome.alarms.clear(ALARM);await sessionStore.remove(['reportConnection','reportArm']);await status({state,message});
     }
     function validate(s){
@@ -21,13 +22,12 @@
     async function snapshot(c){
       if(!await consented())throw Error('보고서 개인정보 처리 안내에 동의하고 연결하세요.');
       const result=await chrome.tabs.sendMessage(c.tabId,{...c,type:'POLL',kind:'report'});
-      if(!result?.ok)throw Error(result?.error||'나이스 탭을 새로고침한 뒤 보고서를 연결하세요.');
+      if(!result?.ok)throw Error(result?.error||'나이스 로그인과 보고서 조회 연결 상태를 확인하세요.');
       return validate(result.snapshot);
     }
     async function notify(rows,c){
-      const title='[보고서 알림]';
-      const message=`새 교외체험학습 보고서 ${rows.length}건\n\n`+rows.map(r=>'• '+String(r.studentName||'이름 확인 필요').replace(/[\r\n\t]+/g,' ').slice(0,100)).join('\n');
-      return deliverAlert('report',title,message,c,rows.map(row=>row.key));
+      const {title,message}=copyAlert('report',rows);
+      return deliverAlert('report',title,message,c,rows);
     }
     async function apply(s,c){
       validate(s);
@@ -50,6 +50,7 @@
         delivered=await notify(fresh,c);
         if(delivered){for(const r of fresh)history[r.key]={sent:true};histories[scope]=history;await local.set({reportHistories:histories});}
       }
+      await pageNotices.replay(c,s);
       c.count=s.count;c.lastCheck=Date.now();await sessionStore.set({reportConnection:c});
       await status({state:'watching',count:s.count,total:s.total,lastCheck:c.lastCheck,message:delivered?'보고서 감시 중 · 접수대기·미상신 최초 확인 시 1회':'보고서 알림 전달 실패 · 다음 조회에서 대상 조건을 확인해 재시도'});
     }

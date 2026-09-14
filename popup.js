@@ -48,6 +48,10 @@ function renderAlerts(items){
       const d=item.delivery;result.dataset.state=d.state;
       const descriptions={page:'나이스 화면에 전달',requested:'Windows 알림 요청 완료',pending:'알림 전달 확인 중'};
       setCopy(result,d.state==='failed'?(d.error==='permission-denied'?'Windows 알림 차단됨':d.target==='windows'?'Windows 알림 요청 실패':'나이스 화면 알림 전달 실패')+(item.kind==='test'?' · 테스트를 다시 실행하세요.':' · 다음 확인에서 대상이면 재시도합니다.'):descriptions[d.state]||'알림 전달 확인 필요');
+      if(item.page?.version===1){
+        const pageText=item.page.viewedAt!==null?'나이스 화면 표시됨':item.page.retiredAt?'현재 알림 대상에서 제외됨':'나이스 화면 표시 대기';
+        if(d.state==='page')setCopy(result,pageText);else setCopy(result,result.textContent+'\n'+pageText);
+      }
       article.append(result);
     }
     box.appendChild(article);

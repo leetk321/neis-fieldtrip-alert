@@ -6,33 +6,60 @@
   const C=TripCore;
   let pending=null, captureBusy=false, busy=false, panel;
   let stopped=false,noticeTimer=null,readyTimer,readyInterval,activeController;
-  let noticeRemaining=0,noticeStartedAt=null,noticeDismiss=null,currentNotice=null;
+  let noticeRemaining=0,noticeStartedAt=null,noticeDismiss=null,currentNotice=null,noticePreparing=false,noticeResumeValidated=false;
   const visible=e=>!!e && e.getClientRects().length>0 && getComputedStyle(e).visibility!=='hidden';
   const hash=async text=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))).map(v=>v.toString(16).padStart(2,'0')).join('');
   async function send(message){
     if(stopped||!chrome.runtime.id){dispose();throw Error('확장 프로그램이 업데이트되었습니다.');}
     return chrome.runtime.sendMessage(message);
   }
-  const notices=[],seenNoticeIds=new Set();
+  const notices=[],seenNoticeIds=new Set(),viewedNotices=new Map(),validatedNoticeScopes=new Set();
   const viewingNotices=()=>document.visibilityState==='visible'&&document.hasFocus();
-  function notice(text,kind='info',alertId) {
+  function notice(text,kind='info',alertId,page) {
     if(stopped)return;
     // Worker retries upsert the same alert without adding another queued banner.
     if(alertId&&seenNoticeIds.has(alertId)){
       const known=currentNotice?.alertId===alertId?currentNotice:notices.find(item=>item.alertId===alertId);
       if(known){
-        known.text=text;
+        known.text=text;known.page=page;
         if(known===currentNotice&&panel)panel.querySelector('[role="status"]').textContent=text;
       }
+      if(viewedNotices.has(alertId))acknowledge(viewedNotices.get(alertId));
       return;
     }
     if(alertId)seenNoticeIds.add(alertId);
-    notices.push({text,kind,alertId});
+    notices.push({text,kind,alertId,page});
     if(!panel)showNextNotice();
+  }
+  function acknowledge(item){
+    if(!item?.page||!item.alertId||item.acknowledged||item.ackPending||stopped)return;
+    item.ackPending=true;
+    // Do not await this in a NOTICE reply: the worker serializes delivery and ACK writes.
+    send({type:'NOTICE_VIEWED',alertId:item.alertId,scope:item.page.scope,identity:item.page.identity,refs:item.page.refs})
+      .then(result=>{if(result?.ok)item.acknowledged=true;}).catch(()=>{}).finally(()=>{item.ackPending=false;});
+  }
+  function displayed(item){
+    if(!item?.page||!item.alertId)return;
+    if(!viewedNotices.has(item.alertId))viewedNotices.set(item.alertId,item);
+    acknowledge(item);
+    while(viewedNotices.size>128){const id=viewedNotices.keys().next().value;viewedNotices.delete(id);seenNoticeIds.delete(id);}
+  }
+  function syncSavedNotices(scope,items){
+    const ids=new Set(items.map(item=>item.alertId));
+    for(let i=notices.length-1;i>=0;i--){
+      const item=notices[i];
+      if(item.page?.scope===scope&&!ids.has(item.alertId)){notices.splice(i,1);seenNoticeIds.delete(item.alertId);}
+    }
+    for(const item of items)notice(item.text,item.kind,item.alertId,item.page);
+  }
+  function clearSavedNotices(scope){
+    syncSavedNotices(scope,[]);
+    if(currentNotice?.page?.scope===scope)noticeDismiss?.();
   }
   function syncNoticeVisibility(){
     if(stopped)return;
     if(!viewingNotices()){
+      validatedNoticeScopes.clear();noticeResumeValidated=false;
       if(noticeStartedAt!==null){
         noticeRemaining=Math.max(0,noticeRemaining-Math.max(0,performance.now()-noticeStartedAt));
         noticeStartedAt=null;
@@ -42,7 +69,17 @@
       return;
     }
     if(!panel){showNextNotice();return;}
+    if(currentNotice?.page&&!noticeResumeValidated){
+      if(noticePreparing)return;
+      noticePreparing=true;const current=currentNotice;
+      identity().then(who=>{
+        if(stopped||current!==currentNotice)return;
+        if(who!==current.page.identity)noticeDismiss?.();else noticeResumeValidated=true;
+      }).catch(()=>{if(current===currentNotice)noticeDismiss?.();}).finally(()=>{noticePreparing=false;if(!stopped)syncNoticeVisibility();});
+      return;
+    }
     panel.style.display='grid';
+    displayed(currentNotice);
     if(noticeTimer!==null)return;
     noticeStartedAt=performance.now();
     const expire=noticeDismiss;
@@ -55,11 +92,27 @@
       expire();
     },noticeRemaining);
   }
-  function showNextNotice(){
-    if(stopped||panel||!viewingNotices())return;
-    const next=notices.shift();if(!next)return;
+  async function showNextNotice(){
+    if(stopped||panel||noticePreparing||!viewingNotices())return;
+    const next=notices[0];if(!next)return;
+    if(next.page){
+      noticePreparing=true;let valid=false;
+      try{
+        valid=await identity()===next.page.identity;
+        if(valid&&!validatedNoticeScopes.has(next.page.scope)){
+          const result=await send({type:'NOTICE_VALIDATE',scope:next.page.scope,identity:next.page.identity});
+          valid=result?.ok===true;if(valid)validatedNoticeScopes.add(next.page.scope);
+        }
+      }catch{}
+      noticePreparing=false;
+      if(stopped)return;
+      if(notices[0]!==next){showNextNotice();return;}
+      if(!valid){notices.shift();seenNoticeIds.delete(next.alertId);showNextNotice();return;}
+      if(!viewingNotices())return;
+    }
+    notices.shift();
     const current=document.createElement('div'),previousFocus=document.activeElement;
-    panel=current;currentNotice=next;current.setAttribute('data-neis-trip-notice','');
+    panel=current;currentNotice=next;noticeResumeValidated=true;current.setAttribute('data-neis-trip-notice','');
     Object.assign(current.style,{position:'fixed',right:'24px',bottom:'64px',zIndex:'2147483647',background:next.kind==='report'?'#ad4f15':next.kind==='departure'?'#643da5':'#123c46',color:'white',padding:'16px',borderRadius:'12px',boxSizing:'border-box',maxWidth:'min(410px, calc(100vw - 48px))',maxHeight:'60vh',display:'grid',gridTemplateColumns:'minmax(0, 1fr) 24px',gridTemplateRows:'minmax(0, 1fr)',columnGap:'10px',overflow:'hidden',font:'14px/1.8 sans-serif',boxShadow:'0 8px 30px #0003'});
     const close=document.createElement('button'),body=document.createElement('div');
     close.type='button';close.setAttribute('aria-label','알림 닫기');close.title='알림 닫기';
@@ -107,6 +160,7 @@
   async function announceReady(){
     if(stopped)return;
     try{
+      for(const item of viewedNotices.values())acknowledge(item);
       const permission=await send({type:'CAN_IDENTIFY'});
       if(stopped)return;
       if(!permission?.allowed){announcedIdentity='';return;}
@@ -219,13 +273,19 @@
           } finally {clearTimeout(timer);activeController=null;}
         } finally {busy=false;}
       }
-      if(message.type==='NOTICE'){notice(message.text,message.kind,message.alertId);return {ok:true};}
+      if(message.type==='NOTICE_CLEAR'){clearSavedNotices(message.scope);return {ok:true};}
+      if(message.type==='NOTICE_SYNC'){
+        if(typeof message.scope!=='string'||!Array.isArray(message.items)||message.items.length>20)throw Error('알림 복원 형식이 올바르지 않습니다.');
+        if(viewingNotices())validatedNoticeScopes.add(message.scope);
+        syncSavedNotices(message.scope,message.items.filter(item=>item.page?.scope===message.scope));return {ok:true};
+      }
+      if(message.type==='NOTICE'){notice(message.text,message.kind,message.alertId,message.page);return {ok:true};}
       return {ok:false,error:'지원하지 않는 요청입니다.'};
     })().then(reply).catch(e=>reply({ok:false,error:e.message}));
     return true;
   }
   function dispose(){
-    stopped=true;pending=null;notices.length=0;seenNoticeIds.clear();
+    stopped=true;pending=null;notices.length=0;seenNoticeIds.clear();viewedNotices.clear();validatedNoticeScopes.clear();
     noticeDismiss=null;noticeStartedAt=null;currentNotice=null;
     clearTimeout(noticeTimer);clearTimeout(readyTimer);clearInterval(readyInterval);
     activeController?.abort();panel?.remove();panel=null;

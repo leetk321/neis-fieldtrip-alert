@@ -13,6 +13,7 @@
 | calendar.js | 근무일·내장 및 다운로드 날짜 계산 |
 | holiday-sync.js | 공개 JSON 검증·캐시·갱신 |
 | alert-delivery.js | 화면/Windows 전송 결과·권한 점검·실패 재시도 지원 |
+| page-notices.js | 미표시 업무 메타데이터·현재 조건 재구성·표시 확인 |
 | background.js | 저장소 제한·주기 조회·발송 이력·알림 |
 | tab-bridge.js | 기존 탭의 코드 버전 확인·패키지 스크립트 재주입 |
 | popup.* / welcome.* / privacy.html | 사용자 화면 |
@@ -36,6 +37,10 @@ Chrome API는 모형으로, 공휴일 HTTP는 모의 응답으로 검증합니�
 ```sh
 node scripts/verify-notice-visibility.cjs
 ```
+
+페이지 알림 영속 복원은 `node scripts/verify-page-replay.cjs`로 확인합니다. 격리된 가상 Chrome 화면에서 3일 뒤 재주입, 현재 학생 부분집합, 표시 확인 재시도, 다른 계정과 조회 실패, 입력·포커스 보존을 검증합니다. `tests/background.test.cjs`는 단계 통합·날짜 경과·보고서 상태 변경·최근 20개 초과·기존 버전 호환도 확인합니다.
+
+`pendingPageNotices`에는 학생 문구 없이 식별값 해시·연결 범위·단계만 저장합니다. 정상 조회 결과로 페이지 문구를 생성하고 `NOTICE_SYNC`로 전달합니다. `NOTICE_VIEWED`는 올바른 확장 발신자·최상위 프레임·현재 연결 탭·학교/계정을 확인한 뒤 표시된 식별값만 삭제합니다. ACK와 발송 처리는 같은 직렬 작업 큐를 사용합니다. 1.9.2 이하 버전의 기록은 표시 여부를 추정하지 않습니다.
 
 ## 패키징
 

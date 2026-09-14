@@ -63,6 +63,11 @@ const root=path.resolve(__dirname,'..');
     });
     await page.waitForFunction(()=>!document.querySelector('#notificationStatus').hidden);
     assert.match(await page.locator('#alertLog .delivery-result').textContent(),/Windows 알림 차단됨/);
+    for(const state of [{viewedAt:null,text:'나이스 화면 표시 대기'},{viewedAt:123,text:'나이스 화면 표시됨'},{viewedAt:null,retiredAt:123,text:'현재 알림 대상에서 제외됨'}]){
+      await page.evaluate(state=>{uiState.alertLog[0].page={version:1,viewedAt:state.viewedAt,retiredAt:state.retiredAt};renderAlerts(uiState.alertLog);},state);
+      assert.match(await page.locator('#alertLog .delivery-result').textContent(),new RegExp('\\n'+state.text));
+      assert.equal(await page.locator('#alertLog .delivery-result .copy-line').count(),2);
+    }
     assert.equal(await page.locator('.watcher-panel[open]').count(),2);
     await page.evaluate(()=>document.querySelectorAll('details').forEach(el=>el.open=true));
     await page.locator('#reset').click();

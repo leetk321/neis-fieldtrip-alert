@@ -22,7 +22,7 @@ function harness(savedConfig={year:'2026',grade:'2',classNo:'3',interval:5},deny
    if(msg.type==='WHO'&&data.loggedOut)return {ok:false,error:'나이스 로그인이 필요합니다.'};
    return msg.type==='POLL'&&msg.kind==='report'?(reportFail?{ok:false,error:'보고서 조회 실패'}:{ok:true,snapshot:reportSnapshot}):originalSend(id,msg);
  };
- const context=vm.createContext({chrome,crypto:webcrypto,URL,console,fetch:holidayFetch,AbortController,TextDecoder,Date:Clock,setTimeout,clearTimeout,structuredClone});
+ const context=vm.createContext({chrome,crypto:webcrypto,URL,console,fetch:holidayFetch,AbortController,TextDecoder,TextEncoder,Date:Clock,setTimeout,clearTimeout,structuredClone});
  context.importScripts=(...files)=>files.forEach(f=>vm.runInContext(fs.readFileSync(path.join(dir,f),'utf8'),context));
  vm.runInContext(fs.readFileSync(path.join(dir,'background.js'),'utf8'),context);
  const send=(message,sender={id:'test-extension'})=>new Promise(resolve=>listeners.message(message,sender,resolve));
@@ -33,7 +33,7 @@ function harness(savedConfig={year:'2026',grade:'2',classNo:'3',interval:5},deny
    const a=data.session.reportArm;
    return send({type:'REPORT_CAPTURE',nonce:a.nonce,identity:a.identity,template:{endpoint:'/report.do',body:'{}',headers:{},schema:{kind:'report',identityMode:'보고서 식별값'}},snapshot:s},page);
  }
- return {injections,setTabActive:v=>tabActive=v,setWindowFocused:v=>windowFocused=v,tabUpdated:(change,tab={id:123,url:'https://goe.neis.go.kr/jsp/main.jsp'})=>listeners.updated(tab.id,change,tab),connectReport,setReportSnapshot:v=>reportSnapshot=v,setReportFail:()=>reportFail=true,osNotifications,setForeground:v=>foreground=v,setMinimized:v=>minimized=v,send,connect,data,alarms,notifications,pageMessages,tabsCreated,page,install:reason=>listeners.installed(reason?{reason}:undefined),startup:()=>listeners.startup(),alarm:name=>listeners.alarm({name}),removeTab:id=>listeners.removed(id),history:()=>Object.values(data.local.alertHistories||{})[0],setRecords:records=>snapshot={records,count:records.filter(r=>r.unsubmitted).length,total:records.length},setDepartures:departures=>snapshot.departures=departures,setSnapshot:v=>snapshot=v,setNow:date=>now=Date.parse(date+'T01:00:00Z'),setFail:()=>fail=true,setWho:value=>whoIdentity=value,setNotificationFail:value=>notificationFail=value};
+ return {injections,setTabActive:v=>tabActive=v,setWindowFocused:v=>windowFocused=v,tabUpdated:(change,tab={id:123,url:'https://goe.neis.go.kr/jsp/main.jsp'})=>listeners.updated(tab.id,change,tab),connectReport,setReportSnapshot:v=>reportSnapshot=v,setReportFail:()=>reportFail=true,osNotifications,setForeground:v=>foreground=v,setMinimized:v=>minimized=v,send,connect,data,alarms,notifications,pageMessages,tabsCreated,page,install:reason=>listeners.installed(reason?{reason}:undefined),startup:()=>listeners.startup(),alarm:name=>listeners.alarm({name}),removeTab:id=>listeners.removed(id),history:()=>Object.values(data.local.alertHistories||{})[0],setRecords:records=>snapshot={records,count:records.filter(r=>r.unsubmitted).length,total:records.length},setDepartures:departures=>snapshot.departures=departures,setSnapshot:v=>snapshot=v,setNow:date=>now=Date.parse(date+'T01:00:00Z'),setFail:(value=true)=>fail=value,setWho:value=>whoIdentity=value,setNotificationFail:value=>notificationFail=value};
 }
 test('connection starts alarm and persists stage flags and automatic profile',async()=>{const h=harness();assert.equal((await h.connect()).ok,true);assert.equal(h.alarms.get('trip-poll').periodInMinutes,5);assert.equal(h.history()['b'.repeat(64)].firstSent,true);assert.equal(h.data.local.connection,undefined);assert.equal(h.data.local.watchProfile.enabled,true);assert.equal(h.data.local.watchProfile.origin,'https://goe.neis.go.kr');assert.equal(h.data.local.watchProfile.template.headers.cookie,undefined);assert.equal(h.notifications.length,1);assert.equal(JSON.stringify(h.history()).includes('2026-09-14'),false);});
 test('unchanged polls deduplicate and new application triggers first alert',async()=>{const h=harness();await h.connect();await h.send({type:'CHECK'});assert.equal(h.notifications.length,1);h.setRecords([rec('c')]);await h.send({type:'CHECK'});assert.equal(h.notifications.length,2);});
@@ -93,7 +93,7 @@ test('settings change removes stale saved query and requires one new capture',as
 test('state exposes query failures instead of concealing them as waiting',async()=>{const h=harness();await h.connect();h.setFail();await h.send({type:'CHECK'});const s=await h.send({type:'STATE'});assert.equal(s.status.state,'paused');assert.match(s.status.message,/로그인/);});
 test('capture validates snapshot before persisting automatic query profile',async()=>{const h=harness();await h.send({type:'ARM'});const a=h.data.session.arm;const r=await h.send({type:'CAPTURE',nonce:a.nonce,identity:a.identity,template:{endpoint:'/observed.do',body:'{}',headers:{},schema:{}},snapshot:{records:null}},h.page);assert.equal(r.ok,false);assert.equal(h.data.local.watchProfile,undefined);});
 
-test('completed reminder persists independently and uses distinct colors and multiline text',async()=>{const h=harness();h.setRecords([]);h.setDepartures([{key:'d'.repeat(64),startDate:'2026-09-14'}]);h.setNow('2026-09-11');await h.connect();assert.equal(h.notifications.length,1);assert.equal(h.notifications[0].n,'trip-departure');assert.match(h.notifications[0].message,/\n/);assert.equal(h.data.local.alertLog[0].kind,'departure');assert.ok(h.pageMessages.some(m=>m.type==='NOTICE'&&m.kind==='departure'));await h.send({type:'CHECK'});assert.equal(h.notifications.length,1);await h.startup();assert.equal(h.notifications.length,1);await h.send({type:'RESET'});await h.send({type:'CHECK'});assert.equal(h.notifications.length,2);});
+test('completed reminder persists independently and uses distinct colors and multiline text',async()=>{const h=harness();h.setRecords([]);h.setDepartures([{key:'d'.repeat(64),startDate:'2026-09-14'}]);h.setNow('2026-09-11');await h.connect();assert.equal(h.notifications.length,1);assert.equal(h.notifications[0].n,'trip-departure');assert.match(h.notifications[0].message,/\n/);assert.equal(h.data.local.alertLog[0].kind,'departure');assert.ok(h.pageMessages.some(m=>m.type==='NOTICE_SYNC'&&m.items.some(i=>i.kind==='departure')));await h.send({type:'CHECK'});assert.equal(h.notifications.length,1);await h.startup();assert.equal(h.notifications.length,1);await h.send({type:'RESET'});await h.send({type:'CHECK'});assert.equal(h.notifications.length,2);});
 test('query test leaves completed reminder history untouched',async()=>{const h=harness();await h.connect();await h.send({type:'RESET'});h.setRecords([]);h.setDepartures([{key:'d'.repeat(64),startDate:'2026-09-14'}]);h.setNow('2026-09-11');await h.send({type:'QUERY_TEST'});assert.equal(h.data.local.alertHistories,undefined);await h.send({type:'CHECK'});assert.equal(h.data.local.alertLog[0].kind,'departure');});
 
 test('all alert categories show only their matching student names',async()=>{
@@ -201,7 +201,7 @@ test('report connection coexists with applications and deduplicates by independe
  h.setReportSnapshot(reportFixture());await h.send({type:'REPORT_CHECK'});assert.equal(h.notifications.filter(n=>n.kind==='report').length,1);
  h.setReportSnapshot(reportFixture('c'));await h.alarm('trip-report-poll');assert.equal(h.notifications.filter(n=>n.kind==='report').length,2);
  assert.match(h.notifications.find(n=>n.kind==='report').message,/보고서예시/);
- assert.ok(h.pageMessages.some(m=>m.type==='NOTICE'&&m.kind==='report'));
+ assert.ok(h.pageMessages.some(m=>m.type==='NOTICE_SYNC'&&m.items.some(i=>i.kind==='report')));
 });
 test('report network failures and stopping do not stop application polling',async()=>{
  const h=harness();await h.connect();await h.connectReport();h.setReportFail();await h.send({type:'REPORT_CHECK'});
@@ -295,11 +295,11 @@ test('failed OS '+kind+' is retried on automatic poll without duplicate inbox or
   const sent=()=>kind==='report'?Object.values(h.data.local.reportHistories||{})[0]?.['b'.repeat(64)]?.sent:
     h.history()[(kind==='departure'?'d':'b').repeat(64)]?.[(kind==='departure'?'departure':kind==='combined'?'reminder':'first')+'Sent'];
   assert.notEqual(sent(),true);
-  const bannerIds=()=>new Set(h.pageMessages.filter(m=>m.type==='NOTICE').map(m=>m.alertId));
+  const bannerIds=()=>new Set(h.pageMessages.filter(m=>m.type==='NOTICE_SYNC').flatMap(m=>m.items.map(i=>i.alertId)));
   await h.alarm(alarm);
   assert.equal(h.data.local.alertLog.length,1);
   assert.equal(h.data.local.alertLog[0].id,id);
-  assert.equal(bannerIds().size,1);assert.ok(bannerIds().has(id));
+  assert.equal(bannerIds().size,1);assert.ok(h.pageMessages.some(m=>m.type==='NOTICE_SYNC'&&m.items.some(i=>i.page.refs.some(r=>r.id===id))));
   h.setNotificationFail(false);await h.alarm(alarm);
   assert.equal(sent(),true);assert.equal(h.osNotifications.length,1);
   assert.equal(h.data.local.alertLog.length,1);
@@ -404,4 +404,125 @@ test('a retry uses the latest student name and period while reusing the failed b
   assert.match(h.osNotifications[0].message,/변경후/);
   assert.match(h.osNotifications[0].message,/2026\.09\.16/);
   assert.ok(!h.osNotifications[0].message.includes('변경전'));
+});
+
+// Page recovery uses current work eligibility and never replays Windows notifications.
+function replayItems(h,lane='application'){
+ const batches=h.pageMessages.filter(m=>m.type==='NOTICE_SYNC'&&JSON.parse(m.scope)[5]===lane);
+ return batches.at(-1)?.items||[];
+}
+const ackPage=(h,item,sender=h.page)=>h.send({type:'NOTICE_VIEWED',identity:item.page.identity,scope:item.page.scope,refs:item.page.refs},sender);
+
+test('unviewed pages survive more than 24 hours and update without another OS request',async()=>{
+ const h=harness();h.setForeground(false);await h.connect();const original=replayItems(h)[0];
+ h.setNow('2026-09-04');h.data.session={};h.data.contentMissing=true;await h.install('update');
+ assert.equal(h.osNotifications.length,1);assert.equal(replayItems(h)[0].alertId,original.alertId);
+ assert.equal(h.data.local.pendingPageNotices.length,1);
+ assert.equal((await ackPage(h,replayItems(h)[0])).ok,true);
+ assert.equal(h.data.local.pendingPageNotices.length,0);assert.ok(h.data.local.alertLog[0].page.viewedAt);
+ await h.install('update');assert.equal(replayItems(h).length,0);assert.equal(h.osNotifications.length,1);
+});
+test('replay reconstructs remaining students with current names and retires processed keys',async()=>{
+ const h=harness();h.setForeground(false);h.setRecords([{...rec('b'),studentName:'처리한학생'},{...rec('c'),studentName:'이전이름'}]);await h.connect();
+ h.setRecords([{...rec('b','접수',false),studentName:'처리한학생'},{...rec('c'),studentName:'현재이름'}]);await h.alarm('trip-poll');
+ const item=replayItems(h)[0];assert.match(item.text,/신청서 1건/);assert.match(item.text,/현재이름/);assert.doesNotMatch(item.text,/처리한학생|이전이름/);
+ assert.deepEqual(h.data.local.pendingPageNotices[0].keys,['c'.repeat(64)]);assert.equal(h.osNotifications.length,1);
+});
+test('unviewed first alerts promote and merge with second alerts without duplicate students',async()=>{
+ const h=harness();h.setForeground(false);await h.connect();h.setNow('2026-09-07');await h.alarm('trip-poll');
+ const items=replayItems(h);assert.equal(items.length,1);assert.equal(items[0].kind,'reminder');assert.match(items[0].text,/1, 2차 통합 알림/);
+ assert.match(items[0].text,/신청서 1건/);assert.equal(items[0].page.refs.length,2);assert.equal(h.osNotifications.length,2);
+ await ackPage(h,items[0]);assert.equal(h.data.local.pendingPageNotices.length,0);assert.ok(h.history()['b'.repeat(64)].reminderSent);
+ await h.alarm('trip-poll');assert.equal(replayItems(h).length,0);assert.equal(h.osNotifications.length,2);
+});
+test('split first batch marks only the displayed subset viewed',async()=>{
+ const h=harness();h.setForeground(false);h.setRecords([rec('b'),rec('c','접수대기',true,'2026-10-01')]);await h.connect();
+ const firstId=h.data.local.alertLog[0].id;h.setNow('2026-09-07');await h.alarm('trip-poll');
+ const items=replayItems(h);assert.equal(items.length,2);
+ await ackPage(h,items.find(i=>i.kind==='reminder'));
+ assert.deepEqual(h.data.local.pendingPageNotices[0].keys,['c'.repeat(64)]);
+ assert.equal(h.data.local.alertLog.find(i=>i.id===firstId).page.viewedAt,null);
+ await ackPage(h,items.find(i=>i.kind==='first'));assert.equal(h.data.local.pendingPageNotices.length,0);
+ assert.ok(h.data.local.alertLog.find(i=>i.id===firstId).page.viewedAt);
+});
+for(const scenario of ['processed','removed','after-start','date-moved'])test('unneeded reminder is retired: '+scenario,async()=>{
+ const h=harness();h.setForeground(false);h.setNow('2026-09-07');await h.connect();
+ if(scenario==='processed')h.setRecords([rec('b','접수',false)]);
+ if(scenario==='removed')h.setRecords([]);
+ if(scenario==='after-start')h.setNow('2026-09-15');
+ if(scenario==='date-moved')h.setRecords([rec('b','접수대기',true,'2026-10-01')]);
+ await h.alarm('trip-poll');assert.equal(replayItems(h).length,0);assert.equal(h.data.local.pendingPageNotices.length,0);assert.equal(h.osNotifications.length,1);
+});
+test('completed replay updates periods and is removed when no longer exactly completed',async()=>{
+ const h=harness();h.setForeground(false);h.setNow('2026-09-11');h.setRecords([]);
+ h.setDepartures([{key:'d'.repeat(64),startDate:'2026-09-14',studentName:'완결학생',period:'이전기간'}]);await h.connect();
+ h.setDepartures([{key:'d'.repeat(64),startDate:'2026-09-14',studentName:'완결학생',period:'2026.09.14 ~ 2026.09.16'}]);await h.alarm('trip-poll');
+ assert.match(replayItems(h)[0].text,/2026.09.14 ~ 2026.09.16/);
+ h.setDepartures([]);await h.alarm('trip-poll');assert.equal(replayItems(h).length,0);assert.equal(h.osNotifications.length,1);
+});
+test('reports remain pending without a time limit and disappear when no longer eligible',async()=>{
+ const h=harness();h.setForeground(false);h.setReportSnapshot(reportFixture());await h.connectReport();
+ h.setNow('2026-10-01');await h.startup();assert.equal(replayItems(h,'report').length,1);assert.equal(h.osNotifications.length,1);
+ h.setReportSnapshot({reports:[],count:0,total:1});await h.alarm('trip-report-poll');
+ assert.equal(replayItems(h,'report').length,0);assert.equal(h.data.local.pendingPageNotices.length,0);
+});
+test('failed query never retires pending work or renders it as current',async()=>{
+ const h=harness();await h.connect();const pending=structuredClone(h.data.local.pendingPageNotices);
+ h.setFail();const begin=h.pageMessages.length;await h.alarm('trip-poll');
+ assert.deepEqual(h.data.local.pendingPageNotices,pending);assert.ok(!h.pageMessages.slice(begin).some(m=>m.type==='NOTICE_SYNC'));
+ h.setFail(false);await h.startup();assert.equal(replayItems(h).length,1);
+});
+test('page ACK is authenticated, idempotent, retryable and independent of Windows retry',async()=>{
+ const h=harness();h.setForeground(false);h.setNotificationFail(true);await h.connect();const item=replayItems(h)[0];
+ for(const sender of [{id:'other',...h.page},{...h.page,id:'other'},{...h.page,frameId:1},{...h.page,tab:{id:999}},{...h.page,url:'https://sen.neis.go.kr/jsp/main.jsp'}].slice(1)){
+  assert.equal((await ackPage(h,item,sender)).ok,false);assert.equal(h.data.local.pendingPageNotices.length,1);
+ }
+ h.setWho('f'.repeat(64));assert.equal((await ackPage(h,item)).ok,false);h.setWho('a'.repeat(64));
+ h.data.rejectAlertLog=true;assert.equal((await ackPage(h,item)).ok,false);assert.equal(h.data.local.pendingPageNotices.length,1);
+ h.data.rejectAlertLog=false;assert.equal((await ackPage(h,item)).ok,true);await ackPage(h,item);
+ assert.equal(h.data.local.pendingPageNotices.length,0);assert.notEqual(h.history()['b'.repeat(64)].firstSent,true);
+ h.setNotificationFail(false);await h.alarm('trip-poll');assert.equal(h.osNotifications.length,1);assert.equal(replayItems(h).length,0);
+});
+test('pending work survives recent-log eviction without keeping duplicate student text',async()=>{
+ const h=harness();h.setForeground(false);const records=[];
+ for(let i=0;i<25;i++){records.push({...rec(),key:i.toString(16).padStart(64,'0'),studentName:'가상학생'+i});h.setRecords(records);if(!i)await h.connect();else await h.alarm('trip-poll');}
+ assert.equal(h.data.local.alertLog.length,20);assert.equal(h.data.local.pendingPageNotices.length,25);
+ assert.doesNotMatch(JSON.stringify(h.data.local.pendingPageNotices),/가상학생|studentName|period/);
+ await h.install('update');assert.match(replayItems(h)[0].text,/신청서 25건/);assert.match(replayItems(h)[0].text,/가상학생0/);assert.equal(h.osNotifications.length,25);
+ await ackPage(h,replayItems(h)[0]);assert.equal(h.data.local.pendingPageNotices.length,0);
+});
+test('legacy alerts and tests are not retroactively treated as unviewed work',async()=>{
+ const h=harness();await h.connect();delete h.data.local.pendingPageNotices;delete h.data.local.alertLog[0].page;
+ await h.send({type:'TEST'});await h.send({type:'OS_TEST'});await h.install('update');
+ assert.equal(replayItems(h).length,0);assert.equal(h.data.local.pendingPageNotices,undefined);
+});
+test('stopping preserves pending work without replay; reset and setting changes remove it',async()=>{
+ const h=harness();await h.connect();await h.send({type:'STOP'});const begin=h.pageMessages.length;await h.install('update');
+ assert.equal(h.data.local.pendingPageNotices.length,1);assert.ok(!h.pageMessages.slice(begin).some(m=>m.type==='NOTICE_SYNC'));
+ await h.connect();await h.send({type:'RESET'});assert.equal(h.data.local.pendingPageNotices,undefined);
+ await h.alarm('trip-poll');assert.equal(h.data.local.pendingPageNotices.length,1);
+ await h.send({type:'SAVE',config:{year:'2026',grade:'2',classNo:'4',interval:5}});assert.equal(h.data.local.pendingPageNotices,undefined);
+});
+test('focus validation uses a fresh snapshot and a different account cannot replay',async()=>{
+ const h=harness();await h.connect();const item=replayItems(h)[0];h.setRecords([]);
+ const request={type:'NOTICE_VALIDATE',scope:item.page.scope,identity:item.page.identity};
+ assert.equal((await h.send(request,h.page)).ok,true);assert.equal(replayItems(h).length,0);
+ h.setWho('f'.repeat(64));assert.equal((await h.send(request,h.page)).ok,false);
+});
+
+test('pending work cannot cross class scope, even with the same school account',async()=>{
+ const h=harness();await h.connect();const old=structuredClone(h.data.local.pendingPageNotices);
+ await h.send({type:'SAVE',config:{year:'2026',grade:'2',classNo:'4',interval:5}});
+ h.data.local.pendingPageNotices=old;h.setRecords([]);await h.connect();assert.equal(replayItems(h).length,0);
+ assert.deepEqual(h.data.local.pendingPageNotices,old);
+});
+test('focus validation does not interrupt an explicit capture window',async()=>{
+ const h=harness();await h.connect();const item=replayItems(h)[0];
+ h.data.session.reportArm={until:Date.parse('2026-09-02T01:00:00Z')};const begin=h.pageMessages.length;
+ const result=await h.send({type:'NOTICE_VALIDATE',scope:item.page.scope,identity:item.page.identity},h.page);
+ assert.equal(result.ok,false);assert.ok(!h.pageMessages.slice(begin).some(m=>m.type==='POLL'));
+});
+test('malformed replay metadata cannot stop either watcher',async()=>{
+ const h=harness();await h.connect();h.data.local.pendingPageNotices.unshift({id:'bad',scope:h.data.local.pendingPageNotices[0].scope,kind:'report',keys:['b'.repeat(64)]});
+ await h.alarm('trip-poll');assert.equal(h.data.local.status.state,'watching');assert.equal(replayItems(h).length,1);
 });
