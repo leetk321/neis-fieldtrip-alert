@@ -2,6 +2,8 @@
 
 담임교사가 지정한 학년·반의 교외체험학습 신청서와 보고서를 확인하는 Chrome 확장 프로그램입니다. 현재 버전은 **1.9.1**, 최소 Chrome 버전은 **120**입니다. 교육청·나이스의 공식 프로그램이 아닙니다.
 
+- Chrome 웹 스토어 다운로드 : https://chromewebstore.google.com/detail/lenkoapndfkiklobnggppllbabjdafpk?utm_source=item-share-cb
+
 ## 알림
 
 | 종류 | 대상 | 시점 |
