@@ -12,6 +12,7 @@
 | report-watcher.js | 독립 보고서 연결·동의·주기 조회·중복 이력 |
 | calendar.js | 근무일·내장 및 다운로드 날짜 계산 |
 | holiday-sync.js | 공개 JSON 검증·캐시·갱신 |
+| alert-delivery.js | 화면/Windows 전송 결과·권한 점검·실패 재시도 지원 |
 | background.js | 저장소 제한·주기 조회·발송 이력·알림 |
 | tab-bridge.js | 기존 탭의 코드 버전 확인·패키지 스크립트 재주입 |
 | popup.* / welcome.* / privacy.html | 사용자 화면 |
@@ -29,6 +30,12 @@ Chrome API는 모형으로, 공휴일 HTTP는 모의 응답으로 검증합니�
 화면 알림의 닫기·입력 보존은 Playwright를 설치한 환경에서 `node scripts/verify-notice.cjs`로 확인할 수 있습니다. 필요한 경우 `CHROME_PATH`에 Chrome 실행 파일 경로를 지정합니다. 실제 나이스나 사용자 프로필 대신 가상 화면에서 마우스·키보드 닫기, 입력값·커서·포커스·스크롤 보존, 긴 알림, 타이머, 업데이트와 새로고침 미발생을 검증합니다.
 
 팝업의 문장 단위 배치와 어절 줄바꿈은 Playwright 환경에서 `node scripts/verify-popup-copy.cjs`로 확인합니다. `CHROME_PATH`로 Chrome 경로를 지정하고 `POPUP_SCREENSHOT`으로 확인용 이미지 경로를 지정할 수 있습니다. 실제 나이스에 접속하지 않고 가상 상태에서 연결 안내·조회 테스트·설정 저장·알림 기록 초기화의 표시를 검증합니다.
+
+비활성 대기열과 표시 시간은 Playwright 환경에서 다음 명령으로 확인합니다. 격리한 가상 Chrome 페이지에서 탭 표시 상태·창 포커스·시간을 제어하여 7분 뒤 복귀, 표시 중 일시 정지, 순서 유지, 같은 알림 재시도 중복 방지, 입력·커서·포커스·스크롤 보존을 검증합니다. 실제 나이스 탭이나 Windows 알림 설정은 조작하지 않습니다.
+
+```sh
+node scripts/verify-notice-visibility.cjs
+```
 
 ## 패키징
 

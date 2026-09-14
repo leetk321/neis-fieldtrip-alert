@@ -42,13 +42,34 @@ const root=path.resolve(__dirname,'..');
     await page.locator('#reportQueryTest').click();
     assert.equal(await page.locator('#reportMessage').textContent(),'보고서 조회 성공 · 접수대기·미상신 2건\n알림 이력은 변경하지 않았습니다.');
     await page.locator('#test').click();
-    assert.equal(await page.locator('#globalMessage .copy-sentence').count(),2);
+    assert.equal(await page.locator('#notificationMessage .copy-sentence').count(),2);
+
+    for(const state of ['requested','denied','failed']){
+      await page.evaluate(state=>{
+        const original=chrome.runtime.sendMessage;
+        chrome.runtime.sendMessage=async m=>m.type==='OS_TEST'
+          ?{ok:true,delivery:{state:state==='requested'?'requested':'failed',error:state==='denied'?'permission-denied':'create-failed'}}
+          :original(m);
+      },state);
+      await page.locator('#windowsTest').click();
+      const text=await page.locator('#notificationMessage').textContent();
+      assert.match(text,state==='requested'?/실제로 나타났는지 확인/:state==='denied'?/차단되어 있습니다/:/요청에 실패/);
+      assert.equal(await page.locator('#notificationMessage').evaluate(el=>document.activeElement===el),true);
+    }
+    await page.evaluate(()=>{
+      uiState.notificationPermission='denied';
+      uiState.alertLog[0].delivery={state:'failed',target:'windows',error:'permission-denied'};
+      refreshUi();
+    });
+    await page.waitForFunction(()=>!document.querySelector('#notificationStatus').hidden);
+    assert.match(await page.locator('#alertLog .delivery-result').textContent(),/Windows 알림 차단됨/);
+    assert.equal(await page.locator('.watcher-panel[open]').count(),2);
     await page.evaluate(()=>document.querySelectorAll('details').forEach(el=>el.open=true));
     await page.locator('#reset').click();
     assert.equal(await page.locator('#globalMessage .copy-sentence').count(),3);
     await page.locator('#save').click();
     assert.equal(await page.locator('#globalMessage').textContent(),'설정을 저장했습니다.\n신청서와 보고서를 각각 다시 연결해 주세요.');
-    const originalLog=await page.locator('#alertLog article p').textContent();
+    const originalLog=await page.locator('#alertLog article p').first().textContent();
     assert.equal(originalLog,await page.evaluate(()=>uiState.alertLog[0].message));
 
     // Check layout using character ranges in the actual rendered Chrome popup.
@@ -93,6 +114,7 @@ const root=path.resolve(__dirname,'..');
       document.querySelector('main>details:last-of-type').open=false;
     });
     if(process.env.POPUP_SCREENSHOT)await page.screenshot({path:process.env.POPUP_SCREENSHOT,fullPage:true});
+    if(process.env.POPUP_INBOX_SCREENSHOT)await page.locator('.alert-inbox').screenshot({path:process.env.POPUP_INBOX_SCREENSHOT});
     assert.deepEqual(errors,[]);
     console.log('PASS: popup actions, sentence packing, word wrapping, explicit newlines, no horizontal overflow, literal text, original alert copy.');
   }finally{await browser.close();}

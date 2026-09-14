@@ -48,3 +48,9 @@ body{word-break:keep-all;overflow-wrap:normal}
 .copy-sentence{display:inline-block;max-width:100%;vertical-align:top;white-space:normal}
 p:has(>.copy-line){white-space:normal}
 #message,#reportMessage,#globalMessage{white-space:normal}
+
+.notification-tests{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}
+#notificationMessage{white-space:normal;font-size:12px;margin:10px 0 0}
+.notification-status{color:#8d421a;font-size:12px}
+#alertLog .delivery-result{font-size:11px;color:#557375;margin-top:8px}
+#alertLog .delivery-result[data-state="failed"]{color:#9a481c;font-weight:600}

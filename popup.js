@@ -42,7 +42,15 @@ function renderAlerts(items){
     const article=document.createElement('article'),head=document.createElement('div'),title=document.createElement('b'),time=document.createElement('time'),body=document.createElement('p');
     article.dataset.kind=item.kind||'';
     title.textContent=item.title||'교외체험학습 알림';time.textContent=item.createdAt?new Date(item.createdAt).toLocaleString('ko-KR'):'';body.textContent=item.message||'';
-    head.append(title,time);article.append(head,body);box.appendChild(article);
+    head.append(title,time);article.append(head,body);
+    if(item.delivery){
+      const result=document.createElement('p');result.className='delivery-result';
+      const d=item.delivery;result.dataset.state=d.state;
+      const descriptions={page:'나이스 화면에 전달',requested:'Windows 알림 요청 완료',pending:'알림 전달 확인 중'};
+      setCopy(result,d.state==='failed'?(d.error==='permission-denied'?'Windows 알림 차단됨':d.target==='windows'?'Windows 알림 요청 실패':'나이스 화면 알림 전달 실패')+(item.kind==='test'?' · 테스트를 다시 실행하세요.':' · 다음 확인에서 대상이면 재시도합니다.'):descriptions[d.state]||'알림 전달 확인 필요');
+      article.append(result);
+    }
+    box.appendChild(article);
   }
 }
 function renderSummary(id,status,kind){
@@ -82,10 +90,12 @@ async function refresh(){
     $('holidayStatus').textContent=h.updatedAt?'공휴일 최근 갱신: '+new Date(h.updatedAt).toLocaleString('ko-KR')+(h.failed?' · 재조회 실패, 저장 자료로 계속 동작':''):'공휴일: 내장 자료 사용'+(h.failed?' · 다운로드 실패, 감시는 계속 동작':'');
     if(h.years?.length)$('holidayStatus').textContent+='\n저장된 연도: '+h.years.join(', ');
     renderAlerts(data.alertLog);
+    $('notificationStatus').hidden=data.notificationPermission!=='denied';
+    setCopy($('notificationStatus'),data.notificationPermission==='denied'?'Chrome에서 이 확장 프로그램의 Windows 알림이 차단되어 있습니다.':'');
   }catch(e){setCopy($('globalMessage'),e.message);$('applicationSummary').textContent='확인 필요';$('reportSummary').textContent='확인 필요';}
 }
 async function action(type,extra={}){
-  const message=$(['SAVE','RESET','TEST'].includes(type)?'globalMessage':'message');
+  const message=$(['TEST','OS_TEST'].includes(type)?'notificationMessage':['SAVE','RESET'].includes(type)?'globalMessage':'message');
   setCopy(message,type==='ARM'?'나이스 연결을 준비하고 있습니다…':'');
   busy=true;controls();
   try{
@@ -94,16 +104,17 @@ async function action(type,extra={}){
     if(type==='QUERY_TEST')setCopy(message,result.awaitingSchema?(result.needsConfirmation?'신청서 발견\n전체 건수 확인을 위해 연결 시작 후 나이스에서 조회하세요.':'조회 응답 확인\n아직 신청서 학습 대기 중입니다.'):`조회 성공 · 현재 미상신 ${result.count}건\n확인 일시: ${new Date(result.checkedAt).toLocaleString('ko-KR')}\n알림 이력은 변경하지 않았습니다.`);
     if(type==='SAVE')setCopy(message,'설정을 저장했습니다.\n신청서와 보고서를 각각 다시 연결해 주세요.');
     if(type==='RESET')setCopy(message,'알림 기록만 초기화했습니다. 두 연결은 유지됩니다. 다음 확인에서 조건에 맞는 신청서와 보고서를 다시 알릴 수 있습니다.');
-    if(type==='TEST')setCopy(message,result.pageShown?'최근 알림과 나이스 화면에 표시 테스트를 완료했습니다.':'최근 알림에 표시 테스트를 완료했습니다. Windows 알림 설정과 무관하게 확인할 수 있습니다.');
+    if(type==='TEST')setCopy(message,result.pageShown?'최근 알림과 나이스 화면에 표시했습니다. Windows 알림은 별도 버튼으로 테스트하세요.':'최근 알림에 예시를 추가했습니다. Windows 알림은 별도 버튼으로 테스트하세요.');
+    if(type==='OS_TEST')setCopy(message,result.delivery?.state==='requested'?'Windows 알림을 요청했습니다.\n실제로 나타났는지 확인해 주세요.\n안 보이면 Windows 설정 → 시스템 → 알림에서 Chrome 알림·배너와 방해 금지 설정을 확인하세요.':result.delivery?.error==='permission-denied'?'Chrome에서 이 확장 프로그램의 알림이 차단되어 있습니다.\n알림을 허용한 뒤 다시 테스트하세요.':'Windows 알림 요청에 실패했습니다.\nWindows 설정 → 시스템 → 알림에서 Chrome 알림 설정을 확인한 뒤 다시 테스트하세요.');
     return true;
   }
   catch(e){setCopy(message,e.message.includes('Receiving end')?'나이스 연결을 확인할 수 없습니다.\n신청서관리 화면에서 다시 연결해 주세요.':e.message);return false;}
-  finally{busy=false;controls();if(type==='ARM'||message.id==='globalMessage'){message.focus({preventScroll:true});message.scrollIntoView({block:'center'});}}
+  finally{busy=false;controls();if(type==='ARM'||['globalMessage','notificationMessage'].includes(message.id)){message.focus({preventScroll:true});message.scrollIntoView({block:'center'});}}
 }
 $('settings').addEventListener('input',()=>dirty=true);
 $('settings').addEventListener('submit',async e=>{e.preventDefault();const c={};for(const id of ['year','grade','classNo','interval'])c[id]=$(id).value;c.excludedDates=$('excludedDates').value;if(await action('SAVE',{config:c}))dirty=false;});
 $('connect').onclick=()=>{if(dirty){setCopy($('message'),'변경한 설정을 먼저 저장하세요.');$('message').focus({preventScroll:true});$('message').scrollIntoView({block:'center'});}else if(!$('consentBox').hidden&&!$('privacyAgree').checked){setCopy($('message'),'연결 전 개인정보 처리 안내를 읽고 동의해 주세요.');$('consentBox').scrollIntoView({block:'center'});$('privacyAgree').focus();}else action('ARM',{consent:$('privacyAgree').checked});};
-for(const [id,type] of [['queryTest','QUERY_TEST'],['check','CHECK'],['stop','STOP'],['test','TEST'],['reset','RESET']])$(id).onclick=()=>action(type);
+for(const [id,type] of [['queryTest','QUERY_TEST'],['check','CHECK'],['stop','STOP'],['test','TEST'],['windowsTest','OS_TEST'],['reset','RESET']])$(id).onclick=()=>action(type);
 async function reportAction(type){
   const message=$('reportMessage');
   if(type==='REPORT_ARM'&&dirty){setCopy(message,'변경한 설정을 먼저 저장하세요.');message.focus();return;}

@@ -5,23 +5,61 @@
   globalThis[key]?.dispose();
   const C=TripCore;
   let pending=null, captureBusy=false, busy=false, panel;
-  let stopped=false,noticeTimer,readyTimer,readyInterval,activeController;
+  let stopped=false,noticeTimer=null,readyTimer,readyInterval,activeController;
+  let noticeRemaining=0,noticeStartedAt=null,noticeDismiss=null,currentNotice=null;
   const visible=e=>!!e && e.getClientRects().length>0 && getComputedStyle(e).visibility!=='hidden';
   const hash=async text=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))).map(v=>v.toString(16).padStart(2,'0')).join('');
   async function send(message){
     if(stopped||!chrome.runtime.id){dispose();throw Error('확장 프로그램이 업데이트되었습니다.');}
     return chrome.runtime.sendMessage(message);
   }
-  const notices=[];
-  function notice(text,kind='info') {
+  const notices=[],seenNoticeIds=new Set();
+  const viewingNotices=()=>document.visibilityState==='visible'&&document.hasFocus();
+  function notice(text,kind='info',alertId) {
     if(stopped)return;
-    notices.push({text,kind});
+    // Worker retries upsert the same alert without adding another queued banner.
+    if(alertId&&seenNoticeIds.has(alertId)){
+      const known=currentNotice?.alertId===alertId?currentNotice:notices.find(item=>item.alertId===alertId);
+      if(known){
+        known.text=text;
+        if(known===currentNotice&&panel)panel.querySelector('[role="status"]').textContent=text;
+      }
+      return;
+    }
+    if(alertId)seenNoticeIds.add(alertId);
+    notices.push({text,kind,alertId});
     if(!panel)showNextNotice();
   }
+  function syncNoticeVisibility(){
+    if(stopped)return;
+    if(!viewingNotices()){
+      if(noticeStartedAt!==null){
+        noticeRemaining=Math.max(0,noticeRemaining-Math.max(0,performance.now()-noticeStartedAt));
+        noticeStartedAt=null;
+      }
+      clearTimeout(noticeTimer);noticeTimer=null;
+      if(panel)panel.style.display='none';
+      return;
+    }
+    if(!panel){showNextNotice();return;}
+    panel.style.display='grid';
+    if(noticeTimer!==null)return;
+    noticeStartedAt=performance.now();
+    const expire=noticeDismiss;
+    noticeTimer=setTimeout(()=>{
+      if(expire!==noticeDismiss)return;
+      if(!viewingNotices()){
+        // If a background transition event was delayed, preserve the remaining time.
+        noticeStartedAt=null;noticeTimer=null;syncNoticeVisibility();return;
+      }
+      expire();
+    },noticeRemaining);
+  }
   function showNextNotice(){
+    if(stopped||panel||!viewingNotices())return;
     const next=notices.shift();if(!next)return;
     const current=document.createElement('div'),previousFocus=document.activeElement;
-    panel=current;current.setAttribute('data-neis-trip-notice','');
+    panel=current;currentNotice=next;current.setAttribute('data-neis-trip-notice','');
     Object.assign(current.style,{position:'fixed',right:'24px',bottom:'64px',zIndex:'2147483647',background:next.kind==='report'?'#ad4f15':next.kind==='departure'?'#643da5':'#123c46',color:'white',padding:'16px',borderRadius:'12px',boxSizing:'border-box',maxWidth:'min(410px, calc(100vw - 48px))',maxHeight:'60vh',display:'grid',gridTemplateColumns:'minmax(0, 1fr) 24px',gridTemplateRows:'minmax(0, 1fr)',columnGap:'10px',overflow:'hidden',font:'14px/1.8 sans-serif',boxShadow:'0 8px 30px #0003'});
     const close=document.createElement('button'),body=document.createElement('div');
     close.type='button';close.setAttribute('aria-label','알림 닫기');close.title='알림 닫기';
@@ -40,7 +78,8 @@
     function dismiss(){
       if(panel!==current)return;
       const restoreFocus=document.activeElement===close;
-      clearTimeout(noticeTimer);current.remove();panel=null;
+      clearTimeout(noticeTimer);noticeTimer=null;noticeStartedAt=null;noticeDismiss=null;noticeRemaining=0;
+      current.remove();panel=null;currentNotice=null;
       // Only return focus after keyboard dismissal; showing a notice never changes focus.
       if(restoreFocus&&previousFocus?.isConnected)previousFocus.focus({preventScroll:true});
       if(!stopped)showNextNotice();
@@ -52,7 +91,8 @@
     close.addEventListener('blur',()=>{close.style.outline='none';});
     for(const type of ['keydown','keyup'])close.addEventListener(type,event=>event.stopPropagation());
     current.append(body,close);document.body.appendChild(current);
-    noticeTimer=setTimeout(dismiss,15000);
+    noticeRemaining=15000;noticeDismiss=dismiss;
+    syncNoticeVisibility();
   }
   async function identity() {
     const bar=document.querySelector('.topbar');
@@ -179,21 +219,28 @@
           } finally {clearTimeout(timer);activeController=null;}
         } finally {busy=false;}
       }
-      if(message.type==='NOTICE'){notice(message.text,message.kind);return {ok:true};}
+      if(message.type==='NOTICE'){notice(message.text,message.kind,message.alertId);return {ok:true};}
       return {ok:false,error:'지원하지 않는 요청입니다.'};
     })().then(reply).catch(e=>reply({ok:false,error:e.message}));
     return true;
   }
   function dispose(){
-    stopped=true;pending=null;notices.length=0;
+    stopped=true;pending=null;notices.length=0;seenNoticeIds.clear();
+    noticeDismiss=null;noticeStartedAt=null;currentNotice=null;
     clearTimeout(noticeTimer);clearTimeout(readyTimer);clearInterval(readyInterval);
     activeController?.abort();panel?.remove();panel=null;
     window.removeEventListener('message',capture);
+    document.removeEventListener('visibilitychange',syncNoticeVisibility);
+    window.removeEventListener('focus',syncNoticeVisibility);
+    window.removeEventListener('blur',syncNoticeVisibility);
     try{chrome.runtime.onMessage.removeListener(onMessage);}catch{}
     if(globalThis[key]?.dispose===dispose)delete globalThis[key];
   }
   globalThis[key]={version,dispose};
   window.addEventListener('message',capture);
+  document.addEventListener('visibilitychange',syncNoticeVisibility);
+  window.addEventListener('focus',syncNoticeVisibility);
+  window.addEventListener('blur',syncNoticeVisibility);
   chrome.runtime.onMessage.addListener(onMessage);
   readyTimer=setTimeout(announceReady,1000);
   readyInterval=setInterval(announceReady,10000);

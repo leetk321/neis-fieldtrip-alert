@@ -2,7 +2,7 @@
 (function(root){
   'use strict';
   function create(env){
-    const {chrome,core:C,setup,validatedProfile,logAlert,showPageNotice,watchingNeis}=env;
+    const {chrome,core:C,setup,validatedProfile,deliverAlert}=env;
     const ALARM='trip-report-poll';
     const local=chrome.storage.local,sessionStore=chrome.storage.session;
     const read=async(store,key)=>(await store.get(key))[key];
@@ -27,9 +27,7 @@
     async function notify(rows,c){
       const title='[보고서 알림]';
       const message=`새 교외체험학습 보고서 ${rows.length}건\n\n`+rows.map(r=>'• '+String(r.studentName||'이름 확인 필요').replace(/[\r\n\t]+/g,' ').slice(0,100)).join('\n');
-      try{await logAlert('report',title,message);}catch{return false;}
-      if(!await watchingNeis(c))try{await chrome.notifications.create('trip-report',{type:'basic',iconUrl:'icon-report.png',title,message,priority:0});}catch{}
-      await showPageNotice(c,`${title}\n${message}`,'report');return true;
+      return deliverAlert('report',title,message,c,rows.map(row=>row.key));
     }
     async function apply(s,c){
       validate(s);
@@ -53,7 +51,7 @@
         if(delivered){for(const r of fresh)history[r.key]={sent:true};histories[scope]=history;await local.set({reportHistories:histories});}
       }
       c.count=s.count;c.lastCheck=Date.now();await sessionStore.set({reportConnection:c});
-      await status({state:'watching',count:s.count,total:s.total,lastCheck:c.lastCheck,message:delivered?'보고서 감시 중 · 접수대기·미상신 최초 확인 시 1회':'보고서 알림 저장 실패 · 다음 조회에서 재시도'});
+      await status({state:'watching',count:s.count,total:s.total,lastCheck:c.lastCheck,message:delivered?'보고서 감시 중 · 접수대기·미상신 최초 확인 시 1회':'보고서 알림 전달 실패 · 다음 조회에서 대상 조건을 확인해 재시도'});
     }
     async function poll(){
       const c=await connection();if(!c)return;

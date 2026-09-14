@@ -5,10 +5,10 @@ function harness(savedConfig={year:'2026',grade:'2',classNo:'3',interval:5},deny
  const data={local:{...(savedConfig?{config:savedConfig}:{}),privacyConsent:{version:1,acceptedAt:1}},session:{}},listeners={},alarms=new Map(),notifications=[],osNotifications=[],pageMessages=[],tabsCreated=[];
  const storage=kind=>({setAccessLevel:async value=>{if(denyStorage)throw Error('storage restriction failed');data.accessLevel=value.accessLevel;},get:async key=>typeof key==='string'?{[key]:structuredClone(data[kind][key])}:structuredClone(data[kind]),set:async values=>{if(kind==='local'&&values.alertLog){if(data.rejectAlertLog)throw Error('alert log unavailable');const item=values.alertLog[0];if(item&&item.kind!=='test'&&!notifications.some(n=>n.id===item.id))notifications.push({...item,n:'trip-'+item.kind});}return Object.assign(data[kind],structuredClone(values));},remove:async keys=>{for(const k of [].concat(keys))delete data[kind][k];}});
  const event=name=>({addListener:fn=>listeners[name]=fn});
- let foreground=true,minimized=false;
+ let foreground=true,minimized=false,tabActive=null,windowFocused=null;
  let snapshot={records:[rec()],count:1,total:2},reportSnapshot={reports:[],count:0,total:0},reportFail=false,fail=false,notificationFail=false,whoIdentity='a'.repeat(64),now=Date.parse('2026-09-01T01:00:00Z');
  class Clock extends Date{constructor(...args){super(...(args.length?args:[now]));}static now(){return now;}}
- const chrome={storage:{local:storage('local'),session:storage('session')},action:{setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{}},alarms:{clear:async n=>alarms.delete(n),create:async(n,o)=>alarms.set(n,o),onAlarm:event('alarm')},notifications:{create:async(n,o)=>{if(notificationFail)throw Error('notification unavailable');osNotifications.push({n,...o});},onClicked:event('notification')},windows:{get:async()=>({focused:foreground,state:minimized?'minimized':'normal'}),update:async()=>{}},tabs:{get:async()=>({active:foreground,windowId:1}),query:async()=>[{id:123,url:'https://goe.neis.go.kr/jsp/main.jsp'}],sendMessage:async(id,msg)=>{pageMessages.push(msg);return msg.type==='ARM'?{ok:true,identity:'a'.repeat(64)}:msg.type==='WHO'?{ok:true,identity:whoIdentity}:msg.type==='NOTICE'?{ok:true}:fail?{ok:false,error:'로그인 만료'}:{ok:true,snapshot};},create:async options=>{tabsCreated.push(options);return {id:999,...options};},onRemoved:event('removed'),update:async()=>({windowId:1})},runtime:{id:'test-extension',getURL:path=>'chrome-extension://test-extension/'+path,onInstalled:event('installed'),onStartup:event('startup'),onMessage:event('message')}};
+ const chrome={storage:{local:storage('local'),session:storage('session')},action:{setBadgeText:async()=>{},setBadgeBackgroundColor:async()=>{}},alarms:{clear:async n=>alarms.delete(n),create:async(n,o)=>alarms.set(n,o),onAlarm:event('alarm')},notifications:{getPermissionLevel:async()=>{if(data.permissionFail)throw Error('unavailable');return data.notificationPermission||'granted';},create:async(n,o)=>{(data.osAttempts||=[]).push(n);if(notificationFail)throw Error('notification unavailable');osNotifications.push({n,...o});},onClicked:event('notification')},windows:{get:async()=>({focused:windowFocused??foreground,state:minimized?'minimized':'normal'}),update:async()=>{}},tabs:{get:async()=>({active:tabActive??foreground,windowId:1}),query:async()=>[{id:123,url:'https://goe.neis.go.kr/jsp/main.jsp'}],sendMessage:async(id,msg)=>{pageMessages.push(msg);return msg.type==='ARM'?{ok:true,identity:'a'.repeat(64)}:msg.type==='WHO'?{ok:true,identity:whoIdentity}:msg.type==='NOTICE'?{ok:true}:fail?{ok:false,error:'로그인 만료'}:{ok:true,snapshot};},create:async options=>{tabsCreated.push(options);return {id:999,...options};},onRemoved:event('removed'),update:async()=>({windowId:1})},runtime:{id:'test-extension',getURL:path=>'chrome-extension://test-extension/'+path,onInstalled:event('installed'),onStartup:event('startup'),onMessage:event('message')}};
  const injections=[];
  chrome.runtime.getManifest=()=>({version:'1.8.0'});
  chrome.alarms.get=async name=>alarms.get(name);
@@ -33,7 +33,7 @@ function harness(savedConfig={year:'2026',grade:'2',classNo:'3',interval:5},deny
    const a=data.session.reportArm;
    return send({type:'REPORT_CAPTURE',nonce:a.nonce,identity:a.identity,template:{endpoint:'/report.do',body:'{}',headers:{},schema:{kind:'report',identityMode:'보고서 식별값'}},snapshot:s},page);
  }
- return {injections,tabUpdated:(change,tab={id:123,url:'https://goe.neis.go.kr/jsp/main.jsp'})=>listeners.updated(tab.id,change,tab),connectReport,setReportSnapshot:v=>reportSnapshot=v,setReportFail:()=>reportFail=true,osNotifications,setForeground:v=>foreground=v,setMinimized:v=>minimized=v,send,connect,data,alarms,notifications,pageMessages,tabsCreated,page,install:reason=>listeners.installed(reason?{reason}:undefined),startup:()=>listeners.startup(),alarm:name=>listeners.alarm({name}),removeTab:id=>listeners.removed(id),history:()=>Object.values(data.local.alertHistories||{})[0],setRecords:records=>snapshot={records,count:records.filter(r=>r.unsubmitted).length,total:records.length},setDepartures:departures=>snapshot.departures=departures,setSnapshot:v=>snapshot=v,setNow:date=>now=Date.parse(date+'T01:00:00Z'),setFail:()=>fail=true,setWho:value=>whoIdentity=value,setNotificationFail:value=>notificationFail=value};
+ return {injections,setTabActive:v=>tabActive=v,setWindowFocused:v=>windowFocused=v,tabUpdated:(change,tab={id:123,url:'https://goe.neis.go.kr/jsp/main.jsp'})=>listeners.updated(tab.id,change,tab),connectReport,setReportSnapshot:v=>reportSnapshot=v,setReportFail:()=>reportFail=true,osNotifications,setForeground:v=>foreground=v,setMinimized:v=>minimized=v,send,connect,data,alarms,notifications,pageMessages,tabsCreated,page,install:reason=>listeners.installed(reason?{reason}:undefined),startup:()=>listeners.startup(),alarm:name=>listeners.alarm({name}),removeTab:id=>listeners.removed(id),history:()=>Object.values(data.local.alertHistories||{})[0],setRecords:records=>snapshot={records,count:records.filter(r=>r.unsubmitted).length,total:records.length},setDepartures:departures=>snapshot.departures=departures,setSnapshot:v=>snapshot=v,setNow:date=>now=Date.parse(date+'T01:00:00Z'),setFail:()=>fail=true,setWho:value=>whoIdentity=value,setNotificationFail:value=>notificationFail=value};
 }
 test('connection starts alarm and persists stage flags and automatic profile',async()=>{const h=harness();assert.equal((await h.connect()).ok,true);assert.equal(h.alarms.get('trip-poll').periodInMinutes,5);assert.equal(h.history()['b'.repeat(64)].firstSent,true);assert.equal(h.data.local.connection,undefined);assert.equal(h.data.local.watchProfile.enabled,true);assert.equal(h.data.local.watchProfile.origin,'https://goe.neis.go.kr');assert.equal(h.data.local.watchProfile.template.headers.cookie,undefined);assert.equal(h.notifications.length,1);assert.equal(JSON.stringify(h.history()).includes('2026-09-14'),false);});
 test('unchanged polls deduplicate and new application triggers first alert',async()=>{const h=harness();await h.connect();await h.send({type:'CHECK'});assert.equal(h.notifications.length,1);h.setRecords([rec('c')]);await h.send({type:'CHECK'});assert.equal(h.notifications.length,2);});
@@ -230,7 +230,7 @@ test('report consent and capture nonce required; foreign callers cannot opt in',
 });
 test('report alert uses orange icon when NEIS tab is not being watched',async()=>{
  const h=harness();h.setForeground(false);h.setReportSnapshot(reportFixture());await h.connectReport();
- assert.equal(h.osNotifications[0].iconUrl,'icon-report.png');assert.equal(h.osNotifications[0].n,'trip-report');
+ assert.equal(h.osNotifications[0].iconUrl,'chrome-extension://test-extension/icon-report.png');assert.match(h.osNotifications[0].n,/^trip-report-/);
 });
 test('shared configuration invalidates both saved connections',async()=>{
  const h=harness();await h.connect();await h.connectReport();await h.send({type:'SAVE',config:{year:'2026',grade:'2',classNo:'4',interval:5}});
@@ -243,4 +243,165 @@ test('a report schema learned from empty capture is stored before future automat
  assert.equal(result.ok,true);assert.equal(h.data.local.reportStatus.state,'learning');
  h.setReportSnapshot({...reportFixture(),learnedSchema:{kind:'report',path:['rows'],identity:['rptSn'],approval:'atrzStsNm'}});
  await h.send({type:'REPORT_CHECK'});assert.equal(h.data.local.reportProfile.template.schema.pending,undefined);assert.equal(h.notifications.length,1);
+});
+
+
+// Use the actual periodic-alarm handlers, including the user's reset -> automatic poll flow.
+for(const mode of [
+  {name:'NEIS foreground',tab:true,window:true,minimized:false,os:0},
+  {name:'another tab',tab:false,window:true,minimized:false,os:1},
+  {name:'another app or Chrome window',tab:true,window:false,minimized:false,os:1},
+  {name:'Chrome minimized',tab:true,window:false,minimized:true,os:1},
+  {name:'minimized with stale focus flag',tab:true,window:true,minimized:true,os:1}
+])test('automatic polling routes every alert kind: '+mode.name,async()=>{
+  for(const kind of ['first','reminder','combined','departure','report']){
+    const h=harness();
+    if(kind==='combined')h.setNow('2026-09-07');
+    if(kind==='departure'){
+      h.setRecords([]);h.setNow('2026-09-11');
+      h.setDepartures([{key:'d'.repeat(64),startDate:'2026-09-14',studentName:'예시',period:'2026.09.14 ~ 2026.09.15'}]);
+    }
+    if(kind==='report'){h.setReportSnapshot(reportFixture());await h.connectReport();}
+    else await h.connect();
+    const alarm=kind==='report'?'trip-report-poll':'trip-poll';
+    assert.equal(h.alarms.get(alarm).periodInMinutes,5);
+    await h.send({type:'RESET'});
+    if(kind==='reminder'){await h.alarm(alarm);h.setNow('2026-09-07');}
+    h.setTabActive(mode.tab);h.setWindowFocused(mode.window);h.setMinimized(mode.minimized);
+    await h.alarm(alarm);
+    assert.equal(h.osNotifications.length,mode.os,kind);
+    const item=h.data.local.alertLog[0];
+    assert.equal(item.delivery.state,mode.os?'requested':'page',kind);
+    if(mode.os)assert.equal(h.osNotifications[0].n,'trip-'+(kind==='combined'?'reminder':kind)+'-'+item.id);
+    await h.alarm(alarm);
+    assert.equal(h.osNotifications.length,mode.os,'no repeat after successful '+kind);
+  }
+});
+
+for(const kind of ['first','combined','departure','report'])
+test('failed OS '+kind+' is retried on automatic poll without duplicate inbox or banner',async()=>{
+  const h=harness();h.setForeground(false);h.setNotificationFail(true);
+  if(kind==='combined')h.setNow('2026-09-07');
+  if(kind==='departure'){
+    h.setRecords([]);h.setNow('2026-09-11');
+    h.setDepartures([{key:'d'.repeat(64),startDate:'2026-09-14'}]);
+  }
+  if(kind==='report'){h.setReportSnapshot(reportFixture());await h.connectReport();}
+  else await h.connect();
+  const alarm=kind==='report'?'trip-report-poll':'trip-poll';
+  assert.equal(h.osNotifications.length,0);
+  const id=h.data.local.alertLog[0].id;
+  assert.equal(h.data.local.alertLog[0].delivery.error,'create-failed');
+  const sent=()=>kind==='report'?Object.values(h.data.local.reportHistories||{})[0]?.['b'.repeat(64)]?.sent:
+    h.history()[(kind==='departure'?'d':'b').repeat(64)]?.[(kind==='departure'?'departure':kind==='combined'?'reminder':'first')+'Sent'];
+  assert.notEqual(sent(),true);
+  const bannerIds=()=>new Set(h.pageMessages.filter(m=>m.type==='NOTICE').map(m=>m.alertId));
+  await h.alarm(alarm);
+  assert.equal(h.data.local.alertLog.length,1);
+  assert.equal(h.data.local.alertLog[0].id,id);
+  assert.equal(bannerIds().size,1);assert.ok(bannerIds().has(id));
+  h.setNotificationFail(false);await h.alarm(alarm);
+  assert.equal(sent(),true);assert.equal(h.osNotifications.length,1);
+  assert.equal(h.data.local.alertLog.length,1);
+  assert.equal(h.data.local.alertLog[0].delivery.state,'requested');
+  if(kind==='combined')assert.equal(h.history()['b'.repeat(64)].firstSent,true);
+  await h.alarm(alarm);assert.equal(h.osNotifications.length,1);
+});
+
+test('denied OS permission is visible and retries after permission is restored',async()=>{
+  const h=harness();h.setForeground(false);h.data.notificationPermission='denied';await h.connect();
+  assert.equal(h.data.local.alertLog[0].delivery.error,'permission-denied');
+  assert.equal(h.data.osAttempts,undefined);
+  assert.equal((await h.send({type:'STATE'})).notificationPermission,'denied');
+  assert.notEqual(h.history()['b'.repeat(64)].firstSent,true);
+  h.data.notificationPermission='granted';await h.alarm('trip-poll');
+  assert.equal(h.osNotifications.length,1);assert.equal(h.history()['b'.repeat(64)].firstSent,true);
+  assert.equal(h.data.local.alertLog.length,1);
+});
+
+test('failed requests never replay stale applications, canceled departures or removed reports',async()=>{
+  for(const change of ['submitted','past-start','canceled-departure','removed-report']){
+    const h=harness();h.setForeground(false);h.setNotificationFail(true);
+    if(change==='canceled-departure'){
+      h.setRecords([]);h.setNow('2026-09-11');
+      h.setDepartures([{key:'d'.repeat(64),startDate:'2026-09-14'}]);
+    }
+    if(change==='removed-report'){h.setReportSnapshot(reportFixture());await h.connectReport();}
+    else await h.connect();
+    h.setNotificationFail(false);
+    if(change==='submitted')h.setRecords([rec('b','접수',false)]);
+    if(change==='past-start')h.setNow('2026-09-15');
+    if(change==='canceled-departure')h.setDepartures([]);
+    if(change==='removed-report')h.setReportSnapshot({reports:[],count:0,total:0});
+    await h.alarm(change==='removed-report'?'trip-report-poll':'trip-poll');
+    assert.equal(h.osNotifications.length,0,change);
+  }
+});
+
+test('OS delivery failure resumes after worker update without recapture or inbox duplication',async()=>{
+  const h=harness();h.setForeground(false);h.setNotificationFail(true);await h.connect();
+  const id=h.data.local.alertLog[0].id;
+  h.data.session={};h.data.contentMissing=true;h.setNotificationFail(false);
+  await h.install('update');
+  assert.equal(h.osNotifications.length,1);
+  assert.equal(h.data.local.alertLog.length,1);
+  assert.equal(h.data.local.alertLog[0].id,id);
+  assert.equal(h.history()['b'.repeat(64)].firstSent,true);
+});
+
+test('new OS batches of the same kind use distinct identifiers',async()=>{
+  const h=harness();h.setForeground(false);await h.connect();
+  h.setRecords([rec('c')]);await h.alarm('trip-poll');
+  assert.equal(h.osNotifications.length,2);
+  assert.notEqual(h.osNotifications[0].n,h.osNotifications[1].n);
+});
+
+test('Windows test works without setup or NEIS and leaves actual histories untouched',async()=>{
+  const h=harness(null);delete h.data.local.privacyConsent;h.data.openTabs=[];
+  const result=await h.send({type:'OS_TEST'});
+  assert.equal(result.ok,true);assert.equal(result.delivery.state,'requested');
+  assert.equal(h.osNotifications.length,1);assert.equal(h.data.local.alertLog[0].kind,'test');
+  assert.equal(h.data.local.alertHistories,undefined);assert.equal(h.data.local.reportHistories,undefined);
+  assert.equal(h.data.session.connection,undefined);assert.equal(h.data.session.reportConnection,undefined);
+  assert.equal(h.injections.length,0);assert.equal(h.pageMessages.length,0);
+  assert.equal(h.tabsCreated.length,0);
+  assert.equal((await h.send({type:'OS_TEST'},h.page)).ok,false);
+});
+
+test('Windows test reports failure or permission denial instead of claiming display success',async()=>{
+  for(const denied of [true,false]){
+    const h=harness();if(denied)h.data.notificationPermission='denied';else h.setNotificationFail(true);
+    const result=await h.send({type:'OS_TEST'});
+    assert.equal(result.ok,true);assert.equal(result.delivery.state,'failed');
+    assert.equal(result.delivery.error,denied?'permission-denied':'create-failed');
+    assert.equal(h.osNotifications.length,0);
+    assert.equal(h.data.local.alertLog[0].delivery.state,'failed');
+    assert.equal(h.data.local.alertHistories,undefined);
+  }
+});
+
+test('permission probe failure does not prevent a valid native request',async()=>{
+  const h=harness();h.setForeground(false);h.data.permissionFail=true;await h.connect();
+  assert.equal(h.osNotifications.length,1);assert.equal((await h.send({type:'STATE'})).notificationPermission,'unknown');
+});
+
+test('foreground delivery after OS failure completes once without late Windows replay',async()=>{
+  const h=harness();h.setForeground(false);h.setNotificationFail(true);await h.connect();
+  h.setForeground(true);await h.alarm('trip-poll');
+  assert.equal(h.history()['b'.repeat(64)].firstSent,true);
+  assert.equal(h.data.local.alertLog[0].delivery.state,'page');
+  h.setForeground(false);h.setNotificationFail(false);await h.alarm('trip-poll');
+  assert.equal(h.osNotifications.length,0);assert.equal(h.data.local.alertLog.length,1);
+});
+
+test('a retry uses the latest student name and period while reusing the failed batch',async()=>{
+  const h=harness();h.setForeground(false);h.setRecords([]);h.setNow('2026-09-11');
+  h.setDepartures([{key:'d'.repeat(64),startDate:'2026-09-14',studentName:'변경전',period:'2026.09.14 ~ 2026.09.15'}]);
+  h.setNotificationFail(true);await h.connect();const id=h.data.local.alertLog[0].id;
+  h.setDepartures([{key:'d'.repeat(64),startDate:'2026-09-14',studentName:'변경후',period:'2026.09.14 ~ 2026.09.16'}]);
+  h.setNotificationFail(false);await h.alarm('trip-poll');
+  assert.equal(h.data.local.alertLog.length,1);assert.equal(h.data.local.alertLog[0].id,id);
+  assert.match(h.osNotifications[0].message,/변경후/);
+  assert.match(h.osNotifications[0].message,/2026\.09\.16/);
+  assert.ok(!h.osNotifications[0].message.includes('변경전'));
 });
