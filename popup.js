@@ -1,6 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
-$('version').textContent=chrome.runtime.getManifest?.()?.version||'1.9.4';
+$('version').textContent=chrome.runtime.getManifest?.()?.version||'1.9.5';
 const sentenceSegmenter=new Intl.Segmenter('ko',{granularity:'sentence'});
 // Keep a fitting sentence together; allow short sentences to share a line.
 // Explicit newlines remain boundaries, and CSS wraps long sentences at spaces.

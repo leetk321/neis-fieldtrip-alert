@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "나이스 교외체험학습 알림",
-  "version": "1.9.4",
+  "version": "1.9.5",
   "description": "지정 학년·반의 미상신 신청, 완결 체험 시작, 새 보고서와 종료 후 5근무일 보고서 미제출·미상신을 알려줍니다.",
   "minimum_chrome_version": "120",
   "permissions": [
