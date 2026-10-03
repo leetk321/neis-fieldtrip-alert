@@ -54,3 +54,5 @@ p:has(>.copy-line){white-space:normal}
 .notification-status{color:#8d421a;font-size:12px}
 #alertLog .delivery-result{font-size:11px;color:#557375;margin-top:8px}
 #alertLog .delivery-result[data-state="failed"]{color:#9a481c;font-weight:600}
+
+.deadline-rules{margin-top:16px;padding:14px 12px;border:1px solid #dfb992;border-radius:8px;background:#fff2e4}.deadline-rules>b{color:#91400f}.alert-inbox article[data-kind="deadline"]{background:#fff0e1;border-left:4px solid #ad4f15;padding:10px;border-radius:6px}.alert-inbox article[data-kind="deadline"] b{color:#994210}

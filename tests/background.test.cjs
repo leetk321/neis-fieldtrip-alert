@@ -63,6 +63,96 @@ test('two conditions already satisfied at initial connection produce one alert a
   assert.equal(h.notifications.length,1);assert.equal(h.data.local.alertLog.length,1);
  }
 });
+
+// Synthetic post-trip data; these tests drive the actual report alarm and worker messages.
+function deadlineRow(key='d',changes={}){return {key:key.repeat(64),link:'e'.repeat(64),startDate:'2026-09-07',endDate:'2026-09-09',period:'2026-09-07 ~ 2026-09-09',studentName:'가상기한학생',completed:true,unsubmitted:false,known:true,...changes};}
+function deadlineApp(rows=[deadlineRow()]){return {records:[],departures:[],count:0,total:rows.length,deadline:{ready:true,rows}};}
+function deadlineReport(rows=[]){const reports=rows.filter(r=>r.unsubmitted).map(r=>({...r,receipt:'접수대기'}));return {reports,count:reports.length,total:rows.length,deadline:{ready:true,rows}};}
+function deadlineAlerts(h){return (h.data.local.alertLog||[]).filter(r=>r.kind==='deadline');}
+function deadlinePending(h){return (h.data.local.pendingPageNotices||[]).filter(r=>r.kind==='deadline');}
+test('1.9.3 update resumes both stored templates and adopts deadline coverage without reconnecting',async()=>{
+ const h=harness();h.setRecords([]);await h.connect();await h.connectReport();
+ const app=structuredClone(h.data.local.watchProfile),report=structuredClone(h.data.local.reportProfile);
+ const upgraded={version:1,totalPaths:[['totalCount']],source:'saved-full-query'};
+ h.setNow('2026-09-21');h.setSnapshot({...deadlineApp(),coverageUpgrade:upgraded});h.setReportSnapshot({...deadlineReport(),coverageUpgrade:upgraded});
+ h.data.session={};h.data.contentMissing=true;h.pageMessages.length=0;await h.install('update');
+ assert.equal(deadlineAlerts(h).length,1);assert.equal(h.data.session.connection.automatic,true);assert.equal(h.data.session.reportConnection.automatic,true);
+ for(const [key,old]of [['watchProfile',app],['reportProfile',report]]){
+  const current=h.data.local[key];assert.equal(current.template.endpoint,old.template.endpoint);assert.equal(current.template.body,old.template.body);assert.deepEqual(current.config,old.config);assert.deepEqual(current.template.schema.coverage,upgraded);
+ }
+ assert.equal(h.pageMessages.some(m=>m.type==='ARM'),false);assert.equal(h.tabsCreated.length,0);
+ assert.ok(h.injections.some(i=>i.files.includes('report-deadline-core.js')));
+});
+test('report alarm issues missing report at fifth workday, once across restart and interval changes',async()=>{
+ const h=harness();h.setSnapshot(deadlineApp());h.setReportSnapshot(deadlineReport());h.setNow('2026-09-15');
+ await h.connect();assert.equal((await h.connectReport()).ok,true);assert.equal(deadlineAlerts(h).length,0);
+ h.setNow('2026-09-16');await h.alarm('trip-report-poll');assert.equal(deadlineAlerts(h).length,1);
+ assert.match(deadlineAlerts(h)[0].message,/미제출/);assert.match(deadlineAlerts(h)[0].message,/2026-09-16/);
+ await h.alarm('trip-report-poll');h.data.session={};await h.startup();assert.equal(deadlineAlerts(h).length,1);
+ await h.send({type:'SAVE',config:{year:'2026',grade:'2',classNo:'3',interval:10}});await h.connect();await h.connectReport();assert.equal(deadlineAlerts(h).length,1);
+ assert.equal(h.data.local.deadlineStatus.state,'watching');
+});
+test('new report and overdue report in the same check share one notification and both histories',async()=>{
+ const h=harness();h.setForeground(false);h.setNow('2026-09-16');h.setSnapshot(deadlineApp());
+ h.setReportSnapshot(deadlineReport([deadlineRow('b',{completed:false,unsubmitted:true})]));await h.connect();await h.connectReport();
+ assert.equal(h.osNotifications.length,1);assert.equal(h.data.local.alertLog.length,1);assert.equal(deadlineAlerts(h).length,1);
+ assert.match(deadlineAlerts(h)[0].message,/미상신/);assert.equal(Object.values(h.data.local.reportHistories)[0]['b'.repeat(64)].sent,true);
+ await h.alarm('trip-report-poll');assert.equal(h.osNotifications.length,1);
+});
+test('failed merged report deadline retries once without a duplicate ordinary report notification',async()=>{
+ const h=harness();h.setForeground(false);h.setNotificationFail(true);h.setNow('2026-09-21');h.setSnapshot(deadlineApp());
+ h.setReportSnapshot(deadlineReport([deadlineRow('b',{completed:false,unsubmitted:true})]));await h.connect();await h.connectReport();
+ assert.equal(h.data.local.alertLog.length,1);assert.equal(h.data.local.alertLog[0].kind,'deadline');assert.equal(h.data.local.deadlineHistories,undefined);assert.equal(h.data.local.reportHistories,undefined);
+ const id=h.data.local.alertLog[0].id;await h.alarm('trip-report-poll');assert.equal(h.data.local.alertLog.length,1);
+ h.setNotificationFail(false);await h.alarm('trip-report-poll');assert.equal(h.osNotifications.length,1);assert.equal(h.data.local.alertLog[0].id,id);assert.equal(Object.values(h.data.local.reportHistories)[0]['b'.repeat(64)].sent,true);
+});
+test('application query failure blocks missing-report judgment but preserves ordinary report monitoring',async()=>{
+ const h=harness();h.setNow('2026-09-21');h.setSnapshot(deadlineApp());await h.connect();h.setFail();
+ h.setReportSnapshot(deadlineReport([deadlineRow('b',{completed:false,unsubmitted:true})]));await h.connectReport();
+ assert.equal(deadlineAlerts(h).length,0);assert.equal(h.data.local.reportStatus.state,'watching');assert.equal(h.data.local.alertLog[0].kind,'report');assert.equal(h.data.local.deadlineStatus.state,'waiting');
+});
+test('failed report query preserves pending deadline without resending a stale banner',async()=>{
+ const h=harness();h.setNow('2026-09-21');h.setSnapshot(deadlineApp());h.setReportSnapshot(deadlineReport());await h.connect();await h.connectReport();
+ const pending=structuredClone(deadlinePending(h));h.setReportFail();const begin=h.pageMessages.length;await h.alarm('trip-report-poll');
+ assert.deepEqual(deadlinePending(h),pending);assert.equal(h.data.local.deadlineStatus.state,'waiting');
+ assert.ok(h.pageMessages.slice(begin).some(m=>m.type==='NOTICE_CLEAR'&&JSON.parse(m.scope)[5]==='deadline'));
+ assert.ok(!h.pageMessages.slice(begin).some(m=>m.type==='NOTICE_SYNC'&&m.items?.some(i=>i.kind==='deadline')));
+});
+test('unknown or ambiguous matching preserves pending metadata; completion retires it',async()=>{
+ const h=harness();h.setNow('2026-09-21');h.setSnapshot(deadlineApp());h.setReportSnapshot(deadlineReport());await h.connect();await h.connectReport();
+ for(const rows of [[deadlineRow('b',{completed:false,known:false})],[deadlineRow('b',{completed:false}),deadlineRow('c',{completed:false})]]){
+  h.setReportSnapshot(deadlineReport(rows));const begin=h.pageMessages.length;await h.alarm('trip-report-poll');
+  assert.equal(deadlinePending(h).length,1);assert.equal(h.data.local.deadlineStatus.held,1);
+  assert.ok(!h.pageMessages.slice(begin).some(m=>m.type==='NOTICE_SYNC'&&m.items?.some(i=>i.kind==='deadline')));
+ }
+ h.setReportSnapshot(deadlineReport([deadlineRow('b',{completed:false})]));await h.alarm('trip-report-poll');assert.equal(deadlinePending(h).length,0);assert.ok(deadlineAlerts(h)[0].page.retiredAt);
+});
+test('late report after an earlier missing alert gets its ordinary new-report alert',async()=>{
+ const h=harness();h.setNow('2026-09-21');h.setSnapshot(deadlineApp());h.setReportSnapshot(deadlineReport());await h.connect();await h.connectReport();
+ h.setReportSnapshot(deadlineReport([deadlineRow('b',{completed:false,unsubmitted:true})]));await h.alarm('trip-report-poll');
+ assert.equal(deadlineAlerts(h).length,1);assert.equal(h.data.local.alertLog.filter(i=>i.kind==='report').length,1);
+ const sync=h.pageMessages.filter(m=>m.type==='NOTICE_SYNC'&&JSON.parse(m.scope)[5]==='deadline').at(-1);assert.match(sync.items[0].text,/미상신/);assert.doesNotMatch(sync.items[0].text,/미제출/);
+});
+test('deadline recovery validates both current queries and ACKs only displayed work',async()=>{
+ const h=harness();h.setNow('2026-09-21');h.setSnapshot(deadlineApp());h.setReportSnapshot(deadlineReport());await h.connect();await h.connectReport();
+ const item=h.pageMessages.flatMap(m=>m.items||[]).find(i=>i.kind==='deadline');assert.ok(item);
+ assert.equal((await h.send({type:'NOTICE_VALIDATE',...item.page},h.page)).ok,true);
+ assert.equal((await h.send({type:'NOTICE_VIEWED',...item.page},h.page)).ok,true);assert.equal(deadlinePending(h).length,0);assert.ok(deadlineAlerts(h)[0].page.viewedAt);
+ await h.send({type:'RESET'});assert.equal(h.data.local.deadlineHistories,undefined);await h.alarm('trip-report-poll');assert.equal(deadlineAlerts(h).length,1);
+});
+test('other class or school never mixes lists; old profile data cannot activate the new feature',async()=>{
+ for(const mode of ['identity','class','old']){
+  const h=harness();h.setNow('2026-09-21');h.setSnapshot(mode==='old'?{records:[],count:0,total:0}:deadlineApp());await h.connect();
+  if(mode==='identity')h.data.session.connection.identity='f'.repeat(64);
+  if(mode==='class')h.data.session.connection.config.classNo='4';
+  h.setReportSnapshot(deadlineReport());await h.connectReport();assert.equal(deadlineAlerts(h).length,0);assert.equal(h.data.local.deadlineStatus.state,'waiting');
+ }
+});
+test('deadline metadata contains only hashes and scope, and stopping either watcher pauses it',async()=>{
+ const h=harness();h.setNow('2026-09-21');h.setSnapshot(deadlineApp());h.setReportSnapshot(deadlineReport());await h.connect();await h.connectReport();
+ const metadata=JSON.stringify([h.data.local.deadlineHistories,deadlinePending(h)]);assert.doesNotMatch(metadata,/가상기한학생|2026-09-07|2026-09-09/);
+ await h.send({type:'STOP'});assert.equal((await h.send({type:'STATE'})).deadline.state,'waiting');const count=deadlineAlerts(h).length;await h.alarm('trip-report-poll');assert.equal(deadlineAlerts(h).length,count);
+});
 test('failed combined alert is retried once without prematurely marking either stage sent',async()=>{
  const h=harness();h.setNow('2026-09-10');h.data.rejectAlertLog=true;await h.connect();
  const key='b'.repeat(64);assert.equal(h.notifications.length,0);assert.equal(h.history()[key].firstSent,undefined);assert.equal(h.history()[key].reminderSent,undefined);assert.equal(h.history()[key].firstPending,true);

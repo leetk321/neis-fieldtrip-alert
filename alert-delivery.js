@@ -21,7 +21,7 @@
         // New batches must not replace an earlier notification of the same kind.
         await chrome.notifications.create('trip-'+item.kind+'-'+item.id,{
           type:'basic',
-          iconUrl:chrome.runtime.getURL(item.kind==='report'?'icon-report.png':item.kind==='departure'?'icon-departure.png':'icon.png'),
+          iconUrl:chrome.runtime.getURL(['report','deadline'].includes(item.kind)?'icon-report.png':item.kind==='departure'?'icon-departure.png':'icon.png'),
           title:item.title,message:item.message,priority:0
         });
         return {state:'requested',target:'windows'};
@@ -52,6 +52,7 @@
   }
   function copy(stage,rows,combined=[]){
     const count=rows.length;
+    if(stage==='deadline')return {title:'[체험학습 보고서 처리 확인]',message:`종료 후 5근무일에 도달한 체험학습 ${count}건\n\n`+rows.map(r=>'• '+String(r.studentName||'이름 확인 필요').replace(/[\r\n\t]+/g,' ').slice(0,100)+' — '+(r.reason==='missing'?'보고서 미제출':'보고서 미상신')+'\n  체험기간: '+r.period+'\n  확인 기준일: '+r.dueDate).join('\n')};
     if(stage==='report')return {title:'[보고서 알림]',message:`새 교외체험학습 보고서 ${count}건\n\n`+rows.map(r=>'• '+String(r.studentName||'이름 확인 필요').replace(/[\r\n\t]+/g,' ').slice(0,100)).join('\n')};
     const names={first:'[1차 알림]',reminder:'[2차 알림]',departure:'[교외체험학습 예정 알림]'};
     const combinedCount=stage==='reminder'?rows.filter(row=>combined.includes(row.key)).length:0;

@@ -1,5 +1,5 @@
 'use strict';
-importScripts('calendar.js','core.js','holiday-sync.js','tab-bridge.js','report-watcher.js','alert-delivery.js','page-notices.js');
+importScripts('calendar.js','core.js','holiday-sync.js','tab-bridge.js','report-watcher.js','alert-delivery.js','page-notices.js','report-deadline-core.js','report-deadline-watcher.js');
 const holidaySync=HolidaySync.create(chrome.storage.local,TripCalendar,typeof fetch==='function'?fetch.bind(globalThis):undefined);
 const C=TripCore, ALARM='trip-poll';
 const defaults={year:C.schoolYear(),grade:'',classNo:'',interval:5,excludedDates:[]};
@@ -14,7 +14,8 @@ const consented=async()=> (await chrome.storage.local.get('privacyConsent')).pri
 const bridge=TripTabBridge.create(chrome);
 const pageNotices=TripPageNotices.create({chrome,core:C,calendar:TripCalendar,copy:TripAlertDelivery.copy});
 const delivery=TripAlertDelivery.create({chrome,logAlert,pageNotices,watchingNeis});
-const reports=TripReportWatcher.create({chrome,core:C,setup,consented,validatedProfile,deliverAlert:delivery.deliver,pageNotices,copyAlert:TripAlertDelivery.copy,ensureTab:bridge.ensure});
+const reports=TripReportWatcher.create({chrome,core:C,setup,consented,validatedProfile,deliverAlert:delivery.deliver,pageNotices,copyAlert:TripAlertDelivery.copy,ensureTab:bridge.ensure,beforeApply:(s,c)=>deadlines.apply(s,c),onDisconnect:()=>deadlines.pause('보고서 연결 후 기한 확인을 재개합니다.')});
+const deadlines=TripReportDeadlineWatcher.create({chrome,core:TripReportDeadlineCore,calendar:TripCalendar,application:session,applicationSnapshot:requestSnapshot,allowed:async()=>await consented()&&(await chrome.storage.local.get('reportConsent')).reportConsent?.version===1&&(await profile())?.enabled===true,delivery,pageNotices,copy:TripAlertDelivery.copy,loadHolidays:()=>holidaySync.load().catch(()=>{})});
 const RECOVERY_ALARM='trip-reconnect';
 async function applicationNeedsResume(){return !!(await consented()&&(await profile())?.enabled&&!await session());}
 async function maintainRecoveryAlarm(){
@@ -51,12 +52,14 @@ async function showPageNotice(connection,text,kind,alertId) {
   catch {return false;}
 }
 async function clearConnection(reason) {
+  await deadlines.pause('신청서 연결 후 기한 확인을 재개합니다.');
   if(await consented())await pageNotices.clear(await session());
   await chrome.alarms.clear(ALARM);
   await chrome.storage.session.remove(['connection','arm']);
   await status({state:'disconnected',message:reason});await badge('!','#995414');
 }
 async function waitForNeis(reason) {
+  await deadlines.pause('나이스 연결 후 기한 확인을 재개합니다.');
   if(await consented())await pageNotices.clear(await session());
   await chrome.alarms.clear(ALARM);
   await chrome.storage.session.remove(['connection','arm']);
@@ -140,6 +143,10 @@ async function requestSnapshot(connection) {
 }
 async function applySnapshot(s,connection) {
   validatedSnapshot(s);
+  if(s.coverageUpgrade&&TripReportDeadlineCore.validCoverage(s.coverageUpgrade)&&!connection.template.schema.coverage){
+    connection.template={...connection.template,schema:{...connection.template.schema,coverage:s.coverageUpgrade}};
+    const saved=await profile();if(saved)await chrome.storage.local.set({watchProfile:{...saved,template:connection.template}});
+  }
   await holidaySync.load().catch(()=>{});
   if(s.learnedSchema&&connection.template.schema.pending){
     if(s.learnedSchema.pending||!Array.isArray(s.learnedSchema.path)||!Array.isArray(s.learnedSchema.identity)||typeof s.learnedSchema.approval!=='string'||typeof s.learnedSchema.startDate!=='string')throw Error('학습된 응답 구조를 확인할 수 없습니다.');
@@ -198,6 +205,7 @@ async function poll() {
   }catch(e){
     await chrome.alarms.clear(ALARM);
     await chrome.storage.session.remove('connection');
+    await deadlines.pause('신청서 조회 실패 · 기한 확인 대기');
     await status({state:'paused',message:'감시 중지 · '+e.message,count:connection.count,lastCheck:connection.lastCheck});
     await badge('!','#995414');
   }
@@ -253,15 +261,17 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     const reportResult=await reports.handle(message,sender,internal,page);if(reportResult)return reportResult;
     if(['NOTICE_VIEWED','NOTICE_VALIDATE'].includes(message.type)){
       if(!page||!sender.tab?.id||!await consented())return {ok:false};
-      const connections=[await session(),await reports.connection()];
+      const reportConnection=await reports.connection();
+      const connections=[await session(),reportConnection,deadlines.connection(reportConnection)];
       const c=connections.find(c=>c&&c.tabId===sender.tab.id&&c.origin===new URL(sender.url).origin&&c.identity===message.identity&&pageNotices.scope(c)===message.scope);
-      if(!c||(c.kind==='report'&&!await reports.canIdentify(sender.url)))return {ok:false};
+      if(!c||(['report','deadline'].includes(c.kind)&&!await reports.canIdentify(sender.url)))return {ok:false};
       const who=await chrome.tabs.sendMessage(c.tabId,{type:'WHO',origin:c.origin});
       if(!who?.ok||who.identity!==c.identity)return {ok:false};
       if(message.type==='NOTICE_VALIDATE'){
         const arming=await chrome.storage.session.get(['arm','reportArm']);
         if([arming.arm,arming.reportArm].some(a=>a?.until>Date.now()))return {ok:false};
-        if(c.kind==='report')await reports.poll();else await poll();
+        if(['report','deadline'].includes(c.kind))await reports.poll();else await poll();
+        if(c.kind==='deadline')return {ok:(await deadlines.getState(await reports.connection())).state==='watching'};
         return {ok:!!(c.kind==='report'?await reports.connection():await session())};
       }
       return {ok:await pageNotices.viewed(message.refs,c)};
@@ -301,12 +311,13 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
     if(!internal)throw Error('확장 프로그램에서만 실행할 수 있습니다.');
     if(message.type==='STATE') {
       const reportState=await reports.getState();
+      const deadlineState=await deadlines.getState(await reports.connection());
       const stored=await chrome.storage.local.get(['status','alertLog','holidayCache']);
       const saved=stored.status;
       const conn=await session();
       const current=await setup();
       const savedProfile=await profile();
-      return {ok:true,...current,report:reportState,notificationPermission:await delivery.permission(),privacyConsented:await consented(),holidayInfo:{updatedAt:stored.holidayCache?.updatedAt||null,years:stored.holidayCache?.years||[],failed:!!stored.holidayCache?.error},status:!await consented()?{state:'disconnected',message:'개인정보 처리 안내에 동의하고 나이스 조회를 다시 연결하세요.'}:!current.configured?{state:'setup',message:'먼저 알림을 받을 학년도·학년·반을 설정하고 저장하세요.'}:saved?.state==='paused'||saved?.state==='connecting'?saved:!conn&&savedProfile?.enabled?{state:'waiting',message:'로그인된 나이스 탭이 열리면 자동으로 감시를 재개합니다.'}:!conn&&saved?.state==='watching'?{state:'disconnected',message:'연결을 다시 시작하세요.'}:saved,connected:!!conn,autoStart:savedProfile?.enabled===true,alertLog:Array.isArray(stored.alertLog)?stored.alertLog.slice(0,20):[]};
+      return {ok:true,...current,report:reportState,deadline:deadlineState,notificationPermission:await delivery.permission(),privacyConsented:await consented(),holidayInfo:{updatedAt:stored.holidayCache?.updatedAt||null,years:stored.holidayCache?.years||[],failed:!!stored.holidayCache?.error},status:!await consented()?{state:'disconnected',message:'개인정보 처리 안내에 동의하고 나이스 조회를 다시 연결하세요.'}:!current.configured?{state:'setup',message:'먼저 알림을 받을 학년도·학년·반을 설정하고 저장하세요.'}:saved?.state==='paused'||saved?.state==='connecting'?saved:!conn&&savedProfile?.enabled?{state:'waiting',message:'로그인된 나이스 탭이 열리면 자동으로 감시를 재개합니다.'}:!conn&&saved?.state==='watching'?{state:'disconnected',message:'연결을 다시 시작하세요.'}:saved,connected:!!conn,autoStart:savedProfile?.enabled===true,alertLog:Array.isArray(stored.alertLog)?stored.alertLog.slice(0,20):[]};
     }
     if(message.type==='SAVE') {
       const next=C.config(message.config);
@@ -348,7 +359,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
       return {ok:true,count:snapshot.count,total:snapshot.total,awaitingSchema:snapshot.awaitingSchema,needsConfirmation:snapshot.needsConfirmation,checkedAt:Date.now()};
     }
     if(message.type==='STOP'){const p=await profile();if(p)await chrome.storage.local.set({watchProfile:{...p,enabled:false}});await clearConnection('사용자가 감시와 자동 재개를 중지했습니다. 다시 연결하면 재개됩니다.');return {ok:true};}
-    if(message.type==='RESET'){await pageNotices.clear(await session());await pageNotices.clear(await reports.connection());await reports.reset();await chrome.storage.local.remove(['history','alertHistories','alertLog','pendingPageNotices']);return {ok:true,connected:!!(await session())};}
+    if(message.type==='RESET'){await pageNotices.clear(await session());await pageNotices.clear(await reports.connection());await deadlines.pause('알림 기록 초기화 · 다음 보고서 조회에서 확인합니다.');await reports.reset();await chrome.storage.local.remove(['history','alertHistories','alertLog','pendingPageNotices','deadlineHistories']);return {ok:true,connected:!!(await session())};}
     if(message.type==='OS_TEST')return {ok:true,delivery:await delivery.test()};
     if(message.type==='TEST') {
       const title='[교외체험학습 알림 표시 테스트]',text='실제 신청서 알림이 아닙니다.\n신청서별 알림 이력에는 영향을 주지 않습니다.';

@@ -1,15 +1,15 @@
 /* Pending work keeps hashes and scope only; student text comes from a fresh query. */
 (function(root){
   'use strict';
-  const kinds=new Set(['first','reminder','departure','report']);
+  const kinds=new Set(['first','reminder','departure','report','deadline']);
   function create({chrome,core,calendar,copy}){
-    const lane=c=>c.kind==='report'?'report':'application';
+    const lane=c=>['report','deadline'].includes(c.kind)?c.kind:'application';
     const scope=c=>JSON.stringify([c.origin,c.identity,c.config.year,c.config.grade,c.config.classNo,lane(c)]);
     function valid(p){
       try{
         const context=JSON.parse(p.scope);
         return typeof p.id==='string'&&Array.isArray(context)&&context.length===6&&kinds.has(p.kind)&&
-          context[5]===(p.kind==='report'?'report':'application')&&Array.isArray(p.keys)&&p.keys.every(k=>/^[a-f0-9]{64}$/.test(k));
+          context[5]===(['report','deadline'].includes(p.kind)?p.kind:'application')&&Array.isArray(p.keys)&&p.keys.every(k=>/^[a-f0-9]{64}$/.test(k));
       }catch{return false;}
     }
     const read=async()=>{
@@ -36,9 +36,10 @@
       let changed=false;
       for(const entry of pending){
         if(entry.scope!==currentScope){kept.push(entry);continue;}
-        const eligible=entry.kind==='report'?s.reports.map(r=>r.key):entry.kind==='first'?[...plan.first,...plan.reminder]:plan[entry.kind];
-        const rows=(entry.kind==='report'?s.reports:entry.kind==='departure'?s.departures||[]:s.records).filter(r=>entry.keys.includes(r.key)&&eligible.includes(r.key));
+        const eligible=entry.kind==='deadline'?s.deadlines.map(r=>r.key):entry.kind==='report'?s.reports.map(r=>r.key):entry.kind==='first'?[...plan.first,...plan.reminder]:plan[entry.kind];
+        const rows=(entry.kind==='deadline'?s.deadlines:entry.kind==='report'?s.reports:entry.kind==='departure'?s.departures||[]:s.records).filter(r=>entry.keys.includes(r.key)&&eligible.includes(r.key));
         const keys=rows.map(r=>r.key);
+        if(entry.kind==='deadline')keys.push(...entry.keys.filter(k=>(s.deadlineHeld||[]).includes(k)&&!keys.includes(k)));
         if(keys.length!==entry.keys.length){changed=true;entry.keys=keys;}
         if(!keys.length){const record=log.find(r=>r.id===entry.id);if(record?.page)record.page.retiredAt=Date.now();continue;}
         kept.push(entry);
@@ -53,7 +54,7 @@
       }
       if(changed)await chrome.storage.local.set({pendingPageNotices:kept,alertLog:log});
       const items=[];
-      for(const kind of ['first','reminder','departure','report']){
+      for(const kind of ['first','reminder','departure','report','deadline']){
         const group=groups.get(kind);if(!group?.size)continue;
         const works=[...group.values()],rows=works.map(w=>w.row),refs=new Map();
         for(const w of works)for(const id of w.refs){if(!refs.has(id))refs.set(id,[]);refs.get(id).push(w.row.key);}

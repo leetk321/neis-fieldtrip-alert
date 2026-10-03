@@ -17,7 +17,7 @@
       // The caller has either checked stored consent/origin or received an explicit connect action.
       const target={tabId:tab.id,frameIds:[0]};
       await chrome.scripting.executeScript({target,world:'MAIN',files:['hook.js']});
-      await chrome.scripting.executeScript({target,world:'ISOLATED',files:['calendar.js','core.js','report-core.js','content.js']});
+      await chrome.scripting.executeScript({target,world:'ISOLATED',files:['calendar.js','core.js','report-core.js','report-deadline-core.js','content.js']});
       return ping(tab.id);
     }
     return {ensure};

@@ -41,7 +41,7 @@ const root=path.resolve(__dirname,'..'),version=JSON.parse(fs.readFileSync(path.
       assert.ok(layout.centered,'Cross must stay centered in the circular button');assert.equal(layout.iconWidth,12);assert.equal(layout.iconHeight,12);
       assert.equal(layout.width,24);assert.equal(layout.height,24);assert.equal(layout.radius,'50%');
     };
-    for(const [kind,color] of [['first','rgb(18, 60, 70)'],['reminder','rgb(18, 60, 70)'],['departure','rgb(100, 61, 165)'],['report','rgb(173, 79, 21)'],['info','rgb(18, 60, 70)']]){
+    for(const [kind,color] of [['first','rgb(18, 60, 70)'],['reminder','rgb(18, 60, 70)'],['departure','rgb(100, 61, 165)'],['report','rgb(173, 79, 21)'],['deadline','rgb(173, 79, 21)'],['info','rgb(18, 60, 70)']]){
       await show(kind,'가상 알림\n대상 학생: 예시학생');
       assert.equal(await notice.evaluate(el=>getComputedStyle(el).backgroundColor),color);
       await checkLayout();
@@ -93,6 +93,6 @@ const root=path.resolve(__dirname,'..'),version=JSON.parse(fs.readFileSync(path.
       await close.click();assert.equal(await notice.count(),0);
     }
     assert.equal(navigations,0);assert.deepEqual(errors,[]);
-    console.log('PASS: five notice kinds; circular x shares first text row without overlap at 280/360/520/1080px; mouse/keyboard close; draft/caret/focus/scroll preserved; long/scrolled content; timer/queue cleanup; update reinjection; no navigation, host clicks, submits or browser errors.');
+    console.log('PASS: six notice kinds; circular x shares first text row without overlap at 280/360/520/1080px; mouse/keyboard close; draft/caret/focus/scroll preserved; long/scrolled content; timer/queue cleanup; update reinjection; no navigation, host clicks, submits or browser errors.');
   }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

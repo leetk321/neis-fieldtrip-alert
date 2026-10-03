@@ -9,7 +9,7 @@ function fixture(version=null){
 const tab={id:123,url:'https://goe.neis.go.kr/jsp/main.jsp',status:'complete'};
 test('ready version uses its existing content script',async()=>{const f=fixture('1.8.0');assert.equal(await f.bridge.ensure(tab),true);assert.equal(f.scripts.length,0);});
 test('missing or older content gets packaged top-frame scripts in execution order',async()=>{
- for(const version of [null,'1.7.2']){const f=fixture(version);assert.equal(await f.bridge.ensure(tab),true);assert.equal(f.scripts.length,2);assert.equal(f.scripts[0].world,'MAIN');assert.equal(f.scripts[1].world,'ISOLATED');assert.deepEqual(Array.from(f.scripts[0].target.frameIds),[0]);assert.deepEqual(Array.from(f.scripts[1].files),['calendar.js','core.js','report-core.js','content.js']);await f.bridge.ensure(tab);assert.equal(f.scripts.length,2);}
+ for(const version of [null,'1.7.2']){const f=fixture(version);assert.equal(await f.bridge.ensure(tab),true);assert.equal(f.scripts.length,2);assert.equal(f.scripts[0].world,'MAIN');assert.equal(f.scripts[1].world,'ISOLATED');assert.deepEqual(Array.from(f.scripts[0].target.frameIds),[0]);assert.deepEqual(Array.from(f.scripts[1].files),['calendar.js','core.js','report-core.js','report-deadline-core.js','content.js']);await f.bridge.ensure(tab);assert.equal(f.scripts.length,2);}
 });
 test('invalid origins and unavailable tabs are skipped without injection',async()=>{
  const f=fixture();for(const url of ['https://example.com/','http://goe.neis.go.kr/','https://goe.neis.go.kr.evil.example/','https://goe.neis.go.kr:8443/','https://user@goe.neis.go.kr/'])assert.equal(await f.bridge.ensure({...tab,url}),false);

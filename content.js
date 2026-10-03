@@ -113,7 +113,7 @@
     notices.shift();
     const current=document.createElement('div'),previousFocus=document.activeElement;
     panel=current;currentNotice=next;noticeResumeValidated=true;current.setAttribute('data-neis-trip-notice','');
-    Object.assign(current.style,{position:'fixed',right:'24px',bottom:'64px',zIndex:'2147483647',background:next.kind==='report'?'#ad4f15':next.kind==='departure'?'#643da5':'#123c46',color:'white',padding:'16px',borderRadius:'12px',boxSizing:'border-box',maxWidth:'min(410px, calc(100vw - 48px))',maxHeight:'60vh',display:'grid',gridTemplateColumns:'minmax(0, 1fr) 24px',gridTemplateRows:'minmax(0, 1fr)',columnGap:'10px',overflow:'hidden',font:'14px/1.8 sans-serif',boxShadow:'0 8px 30px #0003'});
+    Object.assign(current.style,{position:'fixed',right:'24px',bottom:'64px',zIndex:'2147483647',background:['report','deadline'].includes(next.kind)?'#ad4f15':next.kind==='departure'?'#643da5':'#123c46',color:'white',padding:'16px',borderRadius:'12px',boxSizing:'border-box',maxWidth:'min(410px, calc(100vw - 48px))',maxHeight:'60vh',display:'grid',gridTemplateColumns:'minmax(0, 1fr) 24px',gridTemplateRows:'minmax(0, 1fr)',columnGap:'10px',overflow:'hidden',font:'14px/1.8 sans-serif',boxShadow:'0 8px 30px #0003'});
     const close=document.createElement('button'),body=document.createElement('div');
     close.type='button';close.setAttribute('aria-label','알림 닫기');close.title='알림 닫기';
     Object.assign(close.style,{all:'initial',boxSizing:'border-box',gridColumn:'2',gridRow:'1',alignSelf:'start',display:'inline-flex',alignItems:'center',justifyContent:'center',width:'24px',height:'24px',padding:'0',border:'1px solid #ffffff80',borderRadius:'50%',background:'#ffffff1a',color:'white',cursor:'pointer'});
@@ -193,18 +193,31 @@
     }
   }
   async function normalized(data,schema,config,kind='application') {
-    let learnedSchema;
+    let learnedSchema,coverageUpgrade;
+    try{
+      if(!schema.coverage){schema=TripReportDeadlineCore.upgrade(data,schema);coverageUpgrade=schema.coverage;}
+    }catch{} // New deadline validation must not stop existing alerts.
+    async function deadlineData(currentSchema){
+      const result=TripReportDeadlineCore.collect(data,currentSchema,config,kind);
+      if(!result.ready)return result;
+      return {...result,rows:await Promise.all(result.rows.map(async r=>({...r,link:await hash(r.link),key:r.key?await hash(r.key):null})))};
+    }
     if(schema.pending){
-      const resolved=kind==='report'?TripReportCore.resolve(data,schema):C.resolvePending(data,schema);
-      if(resolved.pending)return {records:[],departures:[],reports:[],count:0,total:0,awaitingSchema:true,needsConfirmation:resolved.needsConfirmation};
-      schema=resolved.schema;learnedSchema=schema;
+      let resolved=kind==='report'?TripReportCore.resolve(data,schema):C.resolvePending(data,schema);
+      if(resolved.needsConfirmation&&TripReportDeadlineCore.validCoverage(schema.coverage)){
+        // The unchanged saved request was already captured as a complete, unfiltered query.
+        const total=C.pathGet(data,schema.path).length;
+        try{TripReportDeadlineCore.verifyCounts(data,schema,total);resolved={pending:false,schema:kind==='report'?TripReportCore.learn(data,total):C.learn(data,total)};}catch{}
+      }
+      if(resolved.pending)return {records:[],departures:[],reports:[],count:0,total:0,awaitingSchema:true,needsConfirmation:resolved.needsConfirmation,coverageUpgrade,deadline:await deadlineData(schema)};
+      schema={...resolved.schema,coverage:schema.coverage};learnedSchema=schema;
     }
     if(kind==='report'){
       const result=TripReportCore.select(data,schema,config);
-      return {...result,learnedSchema,reports:await Promise.all(result.reports.map(async r=>({...r,key:await hash(r.key)})))};
+      return {...result,learnedSchema,coverageUpgrade,deadline:await deadlineData(schema),reports:await Promise.all(result.reports.map(async r=>({...r,key:await hash(r.key)})))};
     }
     const result=C.select(data,schema,config);
-    return {learnedSchema,records:await Promise.all(result.records.map(async r=>({...r,key:await hash(r.key)}))),departures:await Promise.all(result.departures.map(async r=>({...r,key:await hash(r.key)}))),count:result.count,total:result.total};
+    return {learnedSchema,coverageUpgrade,deadline:await deadlineData(schema),records:await Promise.all(result.records.map(async r=>({...r,key:await hash(r.key)}))),departures:await Promise.all(result.departures.map(async r=>({...r,key:await hash(r.key)}))),count:result.count,total:result.total};
   }
   async function capture(event){
     const d=event.data;
@@ -226,9 +239,10 @@
       const hasPaging=o=>o&&typeof o==='object'&&Object.entries(o).some(([k,v])=>
         (/^(pageSize|pageUnit|recordCountPerPage|limit|offset)$/i.test(k)&&Number(v)>0)||hasPaging(v));
       if(hasPaging(parsed))throw Error('페이지 단위 조회가 감지되어 자동 감시 연결을 중단했습니다.\n전체 조회 지원 확인이 필요합니다.');
-      const snapshot=await normalized(data,schema,pending.config,pending.kind);
+      const fullSchema=TripReportDeadlineCore.coverage(data,schema,total);
+      const snapshot=await normalized(data,fullSchema,pending.config,pending.kind);
       const report=pending.kind==='report';
-      const reply=await send({type:report?'REPORT_CAPTURE':'CAPTURE',nonce:pending.nonce,identity:who,template:{endpoint,body:d.body,headers:d.headers,schema},snapshot});
+      const reply=await send({type:report?'REPORT_CAPTURE':'CAPTURE',nonce:pending.nonce,identity:who,template:{endpoint,body:d.body,headers:d.headers,schema:fullSchema},snapshot});
       if(!reply.ok)throw Error(reply.error);
       pending=null;
       if(schema.pending)notice('[연결 조건 저장 완료]\n첫 신청서 학습 대기 중입니다.\n전체 건수 확인이 필요한 경우 팝업에서 안내합니다.');

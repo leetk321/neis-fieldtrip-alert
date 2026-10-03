@@ -13,6 +13,7 @@
     const schedule=c=>chrome.alarms.create(ALARM,{periodInMinutes:c.config.interval,delayInMinutes:c.config.interval});
     async function disconnect(message,state='disconnected'){
       if(await consented())await pageNotices.clear(await connection());
+      await env.onDisconnect?.();
       await chrome.alarms.clear(ALARM);await sessionStore.remove(['reportConnection','reportArm']);await status({state,message});
     }
     function validate(s){
@@ -31,6 +32,12 @@
     }
     async function apply(s,c){
       validate(s);
+      if(s.coverageUpgrade&&TripReportDeadlineCore.validCoverage(s.coverageUpgrade)&&!c.template.schema.coverage){
+        c.template={...c.template,schema:{...c.template.schema,coverage:s.coverageUpgrade}};
+        const p=await profile();if(p)await local.set({reportProfile:{...p,template:c.template}});
+      }
+      const deadlineResult=await env.beforeApply?.(s,c)||{};
+      const suppressed=deadlineResult.sent||[],deferred=deadlineResult.deferred||[];
       if(s.learnedSchema&&c.template.schema.pending){
         const x=s.learnedSchema;
         if(x.kind!=='report'||x.pending||!Array.isArray(x.path)||!Array.isArray(x.identity)||!x.identity.length||typeof x.approval!=='string')throw Error('보고서 학습 결과가 올바르지 않습니다.');
@@ -44,7 +51,9 @@
       const scope=`${c.identity}:${c.config.year}:${c.config.grade}:${c.config.classNo}`;
       const histories=(await read(local,'reportHistories'))||{};
       const history=histories[scope]||{};
-      const fresh=s.reports.filter(r=>!history[r.key]?.sent);
+      for(const key of suppressed)if(s.reports.some(r=>r.key===key))history[key]={sent:true};
+      if(suppressed.length){histories[scope]=history;await local.set({reportHistories:histories});}
+      const fresh=s.reports.filter(r=>!history[r.key]?.sent&&!deferred.includes(r.key));
       let delivered=true;
       if(fresh.length){
         delivered=await notify(fresh,c);
@@ -94,7 +103,7 @@
         if(m.template?.schema?.kind!=='report')throw Error('보고서 화면에서 다시 연결하세요.');
         const c={tabId:a.tabId,identity:a.identity,origin:new URL(sender.url).origin,config:a.config,template:m.template,kind:'report'};
         const p=validatedProfile({...c,enabled:true,savedAt:Date.now()});validate(m.snapshot);
-        await local.set({reportProfile:p});await apply(m.snapshot,c);await sessionStore.remove('reportArm');await schedule(c);return {ok:true};
+        await local.set({reportProfile:p});await sessionStore.remove('reportArm');await apply(m.snapshot,c);await schedule(c);return {ok:true};
       }
       if(!internal)throw Error('확장 프로그램에서만 실행할 수 있습니다.');
       if(m.type==='REPORT_ARM'){

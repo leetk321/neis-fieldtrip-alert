@@ -30,11 +30,22 @@
     }
     return date.toISOString().slice(0,10);
   }
+  function addWorkdays(value,days=5,extra=[]){
+    if(!Number.isInteger(days)||days<0)throw Error('근무일 수가 올바르지 않습니다.');
+    const date=new Date(parseDate(value)+'T00:00:00Z'),excluded=new Set(extra);
+    let left=days;
+    while(left>0){
+      date.setUTCDate(date.getUTCDate()+1);
+      const year=date.getUTCFullYear(),iso=date.toISOString().slice(0,10);
+      if(date.getUTCDay()!==0&&date.getUTCDay()!==6&&!(downloaded[year]||holidays[year]||[]).includes(iso.slice(5))&&!excluded.has(iso))left--;
+    }
+    return date.toISOString().slice(0,10);
+  }
   function excludedDates(value){
     const list=Array.isArray(value)?value:String(value||'').split(/[\s,;]+/).filter(Boolean);
     if(list.length>400)throw Error('추가 제외일은 최대 400개까지 설정할 수 있습니다.');
     return [...new Set(list.map(v=>{if(!/^\d{4}-\d{2}-\d{2}$/.test(String(v)))throw Error('추가 제외일은 YYYY-MM-DD 형식으로 입력하세요.');return parseDate(v);} ))].sort();
   }
-  const api={useDownloaded,holidays,parseDate,today,subtractWorkdays,excludedDates,checkedAt:'2026-09-09'};
+  const api={useDownloaded,holidays,parseDate,today,subtractWorkdays,addWorkdays,excludedDates,checkedAt:'2026-09-09'};
   root.TripCalendar=api;if(typeof module!=='undefined')module.exports=api;
 })(globalThis);

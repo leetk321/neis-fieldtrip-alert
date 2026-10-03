@@ -1,5 +1,6 @@
 'use strict';
 const $=id=>document.getElementById(id);
+$('version').textContent=chrome.runtime.getManifest?.()?.version||'1.9.4';
 const sentenceSegmenter=new Intl.Segmenter('ko',{granularity:'sentence'});
 // Keep a fitting sentence together; allow short sentences to share a line.
 // Explicit newlines remain boundaries, and CSS wraps long sentences at spaces.
@@ -79,6 +80,10 @@ async function refresh(){
     setCopy($('reportStatus'),rs.message||'보고서관리에서 조회를 별도로 연결하세요.');
     $('reportChecked').textContent=rs.lastCheck?'마지막 성공 조회 '+new Date(rs.lastCheck).toLocaleString('ko-KR'):'';
     $('reportAuto').textContent='보고서 자동 재개: '+(report.autoStart?'켜짐':'꺼짐');
+    const ds=data.deadline||{};
+    $('deadlineState').textContent=ds.state==='watching'?'보고서 기한 확인 중'+(Number.isInteger(ds.count)?' · 대상 '+ds.count+'건':''):'보고서 기한 확인 대기';
+    setCopy($('deadlineStatus'),ds.message||'신청서와 보고서를 모두 연결하면 기한 알림이 시작됩니다.');
+    $('deadlineChecked').textContent=ds.lastCheck?'마지막 기한 확인 '+new Date(ds.lastCheck).toLocaleString('ko-KR'):'';
     $('setupNotice').hidden=configured;
     $('save').textContent=configured?'설정 저장':'설정 완료';
     controls();
